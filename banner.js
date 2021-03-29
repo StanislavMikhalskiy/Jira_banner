@@ -31,7 +31,7 @@
                 break
             }
             case "DEV": {
-                url = "https://jira.dev.aservices.tech/"
+                url = "https://jira.dev.aservices.tech"
                 break
             }
         }
