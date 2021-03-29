@@ -6,9 +6,9 @@
     document.head.appendChild(s);*/
     //window.alert("Все получилось");
 
-    var script_version = '1.2'
-    var dev_name = "_WS_"
-    var log_preffix = `${dev_name}Banner: `
+    const script_version = '1.2'
+    const environment = "LOCAL"; // LOCAL DEV PROD
+    let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     var gc = {}
 
@@ -24,8 +24,23 @@
     }
     // базовые установки
     function setup(){
+        let url = "";
+        switch (environment) {
+            case "LOCAL": {
+                url = "https://jira.action-media.ru"
+                break
+            }
+            case "PROD": {
+                url = "https://jira.action-media.ru"
+                break
+            }
+            case "DEV": {
+                url = "https://jira.dev.aservices.tech/"
+                break
+            }
+        }
         // заполняем конфиг
-        gc['jira'] = {mainUrl:'https://jira.action-media.ru'}
+        gc['jira'] = {mainUrl:url}
         gc.jira['urls'] = {
             "viewIssue":gc.jira.mainUrl+"/browse/",
             "getIssue":gc.jira.mainUrl+"/rest/api/2/issue/", // gc.jira.urls.getIssue
@@ -120,13 +135,12 @@
         gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();//AJS.Meta.get("issue-key");
         gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
         // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
-        if (dev_name.length > 0) createDebugMenu();
+        if (environment == "LOCAL") createDebugMenu();
     }
     function urlParams(){
         //var paramsString = document.location.search;
         // var searchParams = new URLSearchParams(paramsString);
         gc['urlParams'] = new URLSearchParams(document.location.search);
-
     }
     function createDebugMenu(){
         let styles = `
@@ -673,8 +687,8 @@
     // создаем задачи в инициативах бэклога для планирования
     function cns_createIniciativeTasks(value){
         // задаем описания задач для SS
-        let team = "SS";
-        value[team]["iniciativeTasks"] = {
+        let team_ss = "SS";
+        value[team_ss]["iniciativeTasks"] = {
             "data": { "issueUpdates": [
                 { "fields": {
                         "issuetype": {"id": gc.jira.fields.issueTypes.bcklg.backendSub},
@@ -710,22 +724,22 @@
             }
         }
         // готовим финальный вариант данных для запроса
-        for (let x of value[team].iniciativeTasks.data.issueUpdates) {
+        for (let x of value[team_ss].iniciativeTasks.data.issueUpdates) {
             x.fields["project"] = {"key":"BCKLG"}
             x.fields["description"] = "Учет времени"
-            x.fields["parent"] = {"key":value[team].keyIniciative}
-            x.fields["components"] = [{"id": gc.jira.fields.components[team]}]
-            x.fields[gc.jira.fields.team]= {"id":gc.jira.fields.teams[team]}
+            x.fields["parent"] = {"key":value[team_ss].keyIniciative}
+            x.fields["components"] = [{"id": gc.jira.fields.components[team_ss]}]
+            x.fields[gc.jira.fields.team]= {"id":gc.jira.fields.teams[team_ss]}
             x.fields[gc.jira.fields.businessCase] = {"id":gc.jira.fields.businessCases.bigPicture}
         }
-        let prIniciativeTasks =  createIssuesBulk(value[team].iniciativeTasks.data,value.process);
+        let prIniciativeTasks =  createIssuesBulk(value[team_ss].iniciativeTasks.data,value.process);
         prIniciativeTasks.then(
             result => {
                 let obj = JSON.parse(result);
                 //log(`${JSON.stringify(obj)} `);
                 if (obj) {
-                    showFlag(`Подзадачи для инициативы ${value[team].keyIniciative} успешно созданы`,"Внимание!","success","auto");
-                    log(`Подзадачи для инициативы ${value[team].keyIniciative} успешно созданы`);
+                    showFlag(`Подзадачи для инициативы ${value[team_ss].keyIniciative} успешно созданы`,"Внимание!","success","auto");
+                    log(`Подзадачи для инициативы ${value[team_ss].keyIniciative} успешно созданы`);
                     // создаем эпик в SS
                     //cns_createDevEpicSSTeam(value);
                 } else {
@@ -734,14 +748,14 @@
                 }
             },
             error => {
-                log(`Ошибка создания подзадач для инициативы ${value[team].keyIniciative}`);
-                showFlag(`Ошибка создания подзадач для инициативы ${value[team].keyIniciative}`,"Внимание!","error");
+                log(`Ошибка создания подзадач для инициативы ${value[team_ss].keyIniciative}`);
+                showFlag(`Ошибка создания подзадач для инициативы ${value[team_ss].keyIniciative}`,"Внимание!","error");
             }
         )
 
         // задаем описания задач для SS
-        team = "SEARCH";
-        value[team]["iniciativeTasks"] = {
+        let team_search = "SEARCH";
+        value[team_search]["iniciativeTasks"] = {
             "data": { "issueUpdates": [
                     { "fields": {
                             "issuetype": {"id": gc.jira.fields.issueTypes.bcklg.backendSub},
@@ -759,22 +773,22 @@
             }
         }
         // готовим финальный вариант данных для запроса
-        for (let x of value[team].iniciativeTasks.data.issueUpdates) {
+        for (let x of value[team_search].iniciativeTasks.data.issueUpdates) {
             x.fields["project"] = {"key":"BCKLG"}
             //x.fields["description"] = "Учет времени"
-            x.fields["parent"] = {"key":value[team].keyIniciative}
-            x.fields["components"] = [{"id": gc.jira.fields.components[team]}]
-            x.fields[gc.jira.fields.team]= {"id":gc.jira.fields.teams[team]}
+            x.fields["parent"] = {"key":value[team_search].keyIniciative}
+            x.fields["components"] = [{"id": gc.jira.fields.components[team_search]}]
+            x.fields[gc.jira.fields.team]= {"id":gc.jira.fields.teams[team_search]}
             x.fields[gc.jira.fields.businessCase] = {"id":gc.jira.fields.businessCases.bigPicture}
         }
-        prIniciativeTasks =  createIssuesBulk(value[team].iniciativeTasks.data,value.process);
+        prIniciativeTasks =  createIssuesBulk(value[team_search].iniciativeTasks.data,value.process);
         prIniciativeTasks.then(
             result => {
                 let obj = JSON.parse(result);
                 //log(`${JSON.stringify(obj)} `);
                 if (obj) {
-                    showFlag(`Подзадачи для инициативы ${value[team].keyIniciative} успешно созданы`,"Внимание!","success","auto");
-                    log(`Подзадачи для инициативы ${value[team].keyIniciative} успешно созданы`);
+                    showFlag(`Подзадачи для инициативы ${value[team_search].keyIniciative} успешно созданы`,"Внимание!","success","auto");
+                    log(`Подзадачи для инициативы ${value[team_search].keyIniciative} успешно созданы`);
                     // создаем эпик в SS
                     //cns_createDevEpicSSTeam(value);
                 } else {
@@ -783,8 +797,8 @@
                 }
             },
             error => {
-                log(`Ошибка создания подзадач для инициативы ${value[team].keyIniciative}`);
-                showFlag(`Ошибка создания подзадач для инициативы ${value[team].keyIniciative}`,"Внимание!","error");
+                log(`Ошибка создания подзадач для инициативы ${value[team_search].keyIniciative}`);
+                showFlag(`Ошибка создания подзадач для инициативы ${value[team_search].keyIniciative}`,"Внимание!","error");
             }
         )
 
@@ -1204,7 +1218,7 @@ where p.pub_id = 9\n
                     },
                     { "fields": {
                             "summary": "Настроить GA",
-                            "description": `Требуется для нового издания\n
+                            "description": `Требуется для но����ого издания\n
 # Встроить код счетчиков GA в GTM
 # Создать представления для Системы в GA\n
 После ввода Системы в промышленную эксплуатацию:
@@ -1368,7 +1382,8 @@ where p.pub_id = 9\n
                                 "summary": "Подключить поиск",
                                 "description": `Для нового издания необходимо подключить поиск по документам и в судебной практике
 # Подключить на сайте поиск по документам
-# Завести в БД поисковые теги, подсказки, эталоны\n
+# Завести в БД поисковые теги, подсказки, эталоны
+# Подключить систему/издание в АРМ Лингвиста\n
 Если запускаем несколько систем/изданий одновременно, то для них подключение поиска на каждую по задаче, а индексацию делаем одну ЭМ и одну НПД\n
 Подключение групп Эталонов (для новых систем)`
                             }
@@ -1389,8 +1404,8 @@ where p.pub_id = 9\n
                 let obj = JSON.parse(result);
                 //log(`${JSON.stringify(obj)}`);
                 if (obj && 'issues' in obj && obj.issues != null) {
-                    showFlag(`Задачи для эпика ${value[team].dev.keyDevEpic} успешно созданы`,"Внимание!","success","auto");
-                    log(`Задачи для эпика ${value[team].dev.keyDevEpic} успешно созданы`);
+                    showFlag(`Задачи разработки без эпика в команде ${team} успешно созданы`,"Внимание!","success","auto");
+                    log(`Задачи разработки без эпика в команде ${team} успешно созданы`);
                     // каждую задачу надо связать с инициативой
                     for (let i = 0; i < obj.issues.length; i++) {
                         createIssueLink(value[team].keyIniciative, obj.issues[i].key, gc.jira.fields.IssueLinkTypes.Developers, value.process);
@@ -1423,6 +1438,7 @@ where p.pub_id = 9\n
                 })
         } else {
             showFlag(`Оценки времени добавлены`,"Внимание!","success","auto");
+            log(`Оценки времени добавлены`);
         }
     }
 })();
