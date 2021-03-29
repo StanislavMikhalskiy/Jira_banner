@@ -1,10 +1,6 @@
+// <script type='text/javascript'>
 (function() {
-    /*var s = document.createElement("script");
-    s.async = false;
-    s.defer = true;
-    s.src = "https://<путь-к-скрипту>.jsAJS";
-    document.head.appendChild(s);*/
-    //window.alert("Все получилось");
+    // Автор: Михальский Станислав, 2019-2020
 
     const script_version = '1.2'
     const environment = "LOCAL"; // LOCAL DEV PROD
@@ -1442,3 +1438,4 @@ where p.pub_id = 9\n
         }
     }
 })();
+// </script>
