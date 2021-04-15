@@ -1,12 +1,12 @@
-// <script type='text/javascript'>
+//<script type='text/javascript'>
 (function() {
-    // Автор: Михальский Станислав, 2019-2020
+    // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.2'
-    const environment = "LOCAL"; // LOCAL DEV PROD
+    const script_version = '1.3'
+    const environment = "TEST"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
-    var gc = {}
+    let gc = {}
 
     function log(value){
         var dt = new Date();
@@ -22,7 +22,7 @@
     function setup(){
         let url = "";
         switch (environment) {
-            case "LOCAL": {
+            case "DEV": {
                 url = "https://jira.action-media.ru"
                 break
             }
@@ -30,7 +30,7 @@
                 url = "https://jira.action-media.ru"
                 break
             }
-            case "DEV": {
+            case "TEST": {
                 url = "https://jira.dev.aservices.tech"
                 break
             }
@@ -112,8 +112,15 @@
             }
         }
         gc['current_issue_data'] = {}
+        gc['process'] = {}
         // фиксируем параметры URL
-        urlParams();
+        //urlParams();
+        gc['urlParams'] = new URLSearchParams(document.location.search);
+        // кнопки, которые добавлены через ScriptRunner и на которые вешаем обработчики
+        gc['jiraButton'] = [
+            { "key":"addNewSystem", "value":"ss-new-system-js", "isEventAdded":false, "tryAddEventCount":0},
+            { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0}]
+
         // подписываемся на события
         document.addEventListener("DOMContentLoaded", DOMContentLoaded());
         $(document).ajaxComplete(FajaxComplete);
@@ -129,15 +136,17 @@
         getPermissions();
         // получаем метаданные из Jira
         gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();//AJS.Meta.get("issue-key");
+        log(`current_issue_data = ${gc.current_issue_data.key}`)
         gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
         // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
-        if (environment == "LOCAL") createDebugMenu();
+        if (environment == "DEV") createDebugMenu();
     }
-    function urlParams(){
+    /*function urlParams(){
         //var paramsString = document.location.search;
         // var searchParams = new URLSearchParams(paramsString);
         gc['urlParams'] = new URLSearchParams(document.location.search);
-    }
+    }*/
+    // построение меню отладки для разработки
     function createDebugMenu(){
         let styles = `
 /* Dropdown Button */
@@ -251,9 +260,51 @@
         $menu.append($element);
 
     }
+    // добавляем обработчики кнопкам, которые добавлены через ScriptRunner
+    function AddEventToButton(){
+        // количество попыток навесить события на элементы при срабатывании ajaxComplete
+        let tryCountMax = 50;
+
+        for(let x of gc.jiraButton) {
+            // проверяем, была ли подписка
+            if (!x.isEventAdded && x.tryAddEventCount < tryCountMax) {
+                // ищем элемент
+                let $jButton = $(`#${x.value}`)
+                if ($jButton.length) {
+                    // нашли элемент
+                    switch (x.key){
+                        case "addSmartTasks": {
+                            SmartDlgAddBodyHTML();
+                            $jButton.click(function() { SmartDlgShow() });
+                            gc.current_issue_data['isSmartDlgFirst'] = true;
+                            gc.process = {
+                                "iniciativeSubtask":{
+                                    "backend_count":0,
+                                    "frontend_count":0,
+                                    "req_count":0,
+                                    "test_count":0,
+                                    "design_count":0
+                                }
+                            }
+                            break; }
+                        case "addNewSystem": {
+                            //$jButton.click(function() { showFlag('message', 'title'); });
+                            $jButton.click(function() { cns_createNewSystem() });
+                            break; }
+                    }
+                    x.isEventAdded = true;
+                    log("Найдена кнопка $jButton = "+x.key);
+                } else {
+                    // не нашли элемент
+                    x.tryAddEventCount++;
+                    //Smart_log(ln+"Кнопка не найдена $jButton = "+x.key);
+                }
+            }
+        }
+    }
 
     // запускаем базовые установки
-    let deferredSetup = defer(setup, 1000);
+    let deferredSetup = defer(setup, 3000);
     deferredSetup();
 
     // отобразить пользователю флаг
@@ -266,9 +317,12 @@
             persistent: false
         });
     }
+    // запуск обработчиков при ajax-изменения на странице
     function FajaxComplete(){
         //log(`FajaxComplete`);
         fillKanbanCard();
+        // проверяем подписки на события
+        AddEventToButton();
     }
     // получить разрешения для команд
     function getPermissions(){
@@ -499,8 +553,8 @@
         }
     }
 
-    // пул задач для заведения новой справочной системы
     /*
+    Пул задач для заведения новой справочной системы
     Цель процесса - автоматизированное заведение скопа задач в несколько команд для создания новой системы/издания в Справочных
     Процесс запускается из эпика бэклога при условии, что в компоненте указаны "Справочные системы"
     */
@@ -1417,7 +1471,6 @@ where p.pub_id = 9\n
             }
         )
     }
-
     // рекурсивно выставляем время в задачи
     function cns_setTimeTrackingRecurse(value, process){
         if ( value.length > 0 ) {
@@ -1437,5 +1490,688 @@ where p.pub_id = 9\n
             log(`Оценки времени добавлены`);
         }
     }
+
+    /*SMART-диалог для создания подзадач в инициативе*/
+    function SmartDlgAddBodyHTML(){
+        let dialog = `
+<section id="demo-dialog" class="aui-dialog2 aui-dialog2-xlarge aui-layer demo-dialog-smart" role="dialog" aria-hidden="true">
+<header class="aui-dialog2-header">
+    <h2 id="smart-dlg-initiative-key">...</h2>
+</header>
+<aui-progressbar id="smart-dialog-progress" value="0" max="0"></aui-progressbar>
+<div class="aui-dialog2-content">
+
+    <fieldset id="fieldset_backend" class="smart-fieldset">
+        <legend>Backend</legend>
+        <button id="btn_backend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"backend">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_frontend" class="smart-fieldset">
+        <legend>Frontend</legend>
+        <button id="btn_frontend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"frontend">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_req" class="smart-fieldset">
+        <legend>Requirements</legend>
+        <button id="btn_req_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"req">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_test" class="smart-fieldset">
+        <legend>Testing</legend>
+        <button id="btn_test_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"test">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_design" class="smart-fieldset">
+        <legend>Design</legend>
+        <button id="btn_design_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"design">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_other" class="smart-fieldset">
+        <legend>Прочее</legend>
+        <form class="aui">
+            <div class="checkbox">
+                <input id="smart_can_create_epic" class="checkbox" type="checkbox" name="checkBoxOne" id="checkBoxOne">
+                <label for="checkBoxOne">Создать эпик в проекте разработки</label>
+            </div>
+            <input id="smart_epic_short_name" class="text medium-field" type="text" name="EpicTaskName" placeholder="Короткое имя" value="">
+        </form>
+    </fieldset>
+
+</div>
+<footer class="aui-dialog2-footer">
+    <div class="aui-dialog2-footer-actions">
+        <button id="smart-dialog-create-button" class="aui-button aui-button-primary">Make it so</button>
+        <button id="smart-dialog-cancel-button" class="aui-button aui-button-link">Отмена</button>
+    </div>
+</footer>
+</section>
+
+<style>
+.demo-dialog-smart {
+   width: 900px;
+}
+
+.smart-fieldset{
+	border-width: 1px;
+    margin-bottom: 15px;
+}
+
+</style>
+`;
+
+        $("body").append(dialog);
+    }
+    function SmartDlgShow() {
+        // считываем данные инициативы для дальнейшего использования
+        let url = new URL(gc.jira.urls.getIssue+gc.current_issue_data.key);
+        url.searchParams.set('fields', 'summary,components,customfield_11601,customfield_11610,customfield_11504');
+        //url.searchParams.set('ABDetail', 'AB_SmartDlgShow');
+        //url.searchParams.set('CustomSource', 'AnnouncementBanner');
+        $.ajax({
+            url: url, // указываем URL
+            type: "GET", // HTTP метод, по умолчанию GET
+            data: {"AProcess": 'ABanner', 'ABProcess':'SmartDlg', 'ADetail':'GetIniciative'}, // данные, которые отправляем на сервер CustomSource=AnnouncementBanner ABDetail=AB_SmartDlgShow
+            dataType: "json", // тип данных загружаемых с сервера
+            async: false,
+            success: function (data) {
+                //Smart_log(ln+`data ${JSON.stringify(data)}`);
+                SmartDlgGetIniciativeDataFromObj(data);
+                // разблокируем кнопку создания задач
+                SmartDlgSetButtonStateDisable(false);
+                //Smart_log(ln+`Данные по инициативе ${current_issue_data.key} успешно получены`);
+            },
+            error: function(){
+                showFlag(`Не удалось получить данные по задаче <strong>${gc.current_issue_data.key}</strong>. Попробуйте перезагрузить страницу.`,"Внимание!","error");
+                log(`Ошибка выполнения GET запроса`);
+                log(`url: ${url}`);
+            }
+        });
+
+        // очищаем список созданых ранее задач
+        gc.current_issue_data["newIssueList"] = []
+        // добавляем в описание код задачи
+        $("#smart-dlg-initiative-key").text(`Добавление подзадач в инициативу ${gc.current_issue_data.key}`);
+        // блокируем кнопку до получения данных по задаче
+        // отключили async
+        //SmartDlgSetButtonStateDisable(true);
+        // скрываем прогресс бар
+        $("#smart-dialog-progress").hide();
+        // проверяем, что команда задана, иначе блокируем создание эпика
+        if (gc.current_issue_data.teamCode.length == 0) {
+            SmartDlgDisableCreateEpic(true);
+        } else {
+            // проверяем, что у нас есть маппинг команды на код проекта
+            if (SmartDlgGetProjectByTeam(gc.current_issue_data.teamCode).length == 0) {
+                SmartDlgDisableCreateEpic(true);
+                showFlag(`Не удалось определить проект разработки по коду команды. Создание эпика невозможно.`,"Нет маппинга для команды","warning");
+            } else {
+                SmartDlgDisableCreateEpic(false);
+            }
+        }
+
+        // проверяем, что диалог еще не отображался и навешиваем обработчки
+        if (gc.current_issue_data.isSmartDlgFirst) {
+            // назначаем обработчики кнопкам диалога
+            AJS.$("#smart-dialog-cancel-button").click(function (e) {
+                e.preventDefault();
+                AJS.dialog2("#demo-dialog").hide();
+            });
+            $("#smart-dialog-create-button").click(function() { SmartDlgCreateTasks(); });
+            $("#btn_backend_add").click(function() { SmartDlgAddNewTask("backend"); });
+            $("#btn_frontend_add").click(function() { SmartDlgAddNewTask("frontend"); });
+            $("#btn_req_add").click(function() { SmartDlgAddNewTask("req"); });
+            $("#btn_test_add").click(function() { SmartDlgAddNewTask("test"); });
+            $("#btn_design_add").click(function() { SmartDlgAddNewTask("design"); });
+
+            gc.current_issue_data.isSmartDlgFirst = false;
+        }
+        // отображаем диалог
+        AJS.dialog2("#demo-dialog").show();
+    }
+    function SmartDlgGetIniciativeDataFromObj(obj){
+        let notifyMessage = "";
+        //Smart_log(ln+`data input ${JSON.stringify(obj)}`);
+
+        if (obj) {
+            if ('fields' in obj) {
+                if ('components' in obj.fields && obj.fields.components != null) {
+                    gc.current_issue_data["components"] = obj.fields.components;
+                    // чистим данные для последеюущего прозрачного использования при создании задачи
+                    for (let component of gc.current_issue_data.components) {
+                        delete component.self;
+                        delete component.name;
+                    }
+                    /*
+                    fields."components": [
+                      {
+                        "self": "https://jira.action-media.ru/rest/api/2/component/10014",
+                        "id": "10014",
+                        "name": "Справочные системы"
+                      },
+                      {
+                        "self": "https://jira.action-media.ru/rest/api/2/component/10014",
+                        "id": "10014",
+                        "name": "Справочные системы"
+                      }
+                    ]
+                    */
+                } else {
+                    notifyMessage += "<br>В инициативе не заданы компоненты";
+                    log(`В инициативе не заданы компоненты`);
+                }
+                // получаем название
+                if ('summary' in obj.fields && obj.fields.summary != null) {
+                    gc.current_issue_data["summary"] = obj.fields.summary;
+                } else {
+                    gc.current_issue_data["summary"] = "";
+                    notifyMessage += "<br>В инициативе нет наименования"
+                    log(`В инициативе нет наименования`);
+                }
+                // получаем команду
+                if ('customfield_11601' in obj.fields && obj.fields.customfield_11601 != null) {
+                    gc.current_issue_data["customfield_11601"] = obj.fields.customfield_11601;
+                    gc.current_issue_data["teamCode"] = obj.fields.customfield_11601.value;
+                    delete gc.current_issue_data.customfield_11601.self;
+                    delete gc.current_issue_data.customfield_11601.value;
+                    /*
+                    fields."customfield_11601": {
+                      "self": "https://jira.action-media.ru/rest/api/2/customFieldOption/11830",
+                      "value": "SS",
+                      "id": "11830"
+                    }
+                    */
+                } else {
+                    gc.current_issue_data["teamCode"] = "";
+                    notifyMessage += "<br>В инициативе не задана команда"
+                    log(`В инициативе не задана команда`);
+                }
+                // получаем значение поля "Добавить в"
+                if ('customfield_11610' in obj.fields && obj.fields.customfield_11610 != null) {
+                    gc.current_issue_data["customfield_11610"] = obj.fields.customfield_11610;
+                    delete gc.current_issue_data.customfield_11610.self;
+                    delete gc.current_issue_data.customfield_11610.value;
+                    /*
+                    fields."добавить в"
+                        "customfield_11610": {
+                          "self": "https://jira.action-media.ru/rest/api/2/customFieldOption/11851",
+                          "value": "портфель проектов",
+                          "id": "11851"
+                        }
+                    */
+                } else {
+                    notifyMessage += "<br>Не определен портфель проектов"
+                    log(`Не определен портфель проектов`);
+                }
+                // дата начала задачи
+                if ('customfield_11504' in obj.fields && obj.fields.customfield_11504 != null) {
+                    gc.current_issue_data["customfield_11504"] = obj.fields.customfield_11504; // "customfield_11504": "2020-09-28"
+                } else {
+                    log(`Ошибка. В инициативе отсутствует дата старта obj.fields.customfield_11504 == null`);
+                }
+                //Smart_log(ln+`Parsing complete`);
+                if (notifyMessage) {
+                    showFlag(`${notifyMessage}`,"Внимание!","warning");
+                }
+                //Smart_log(ln+`data ${JSON.stringify(current_issue_data)}`);
+            } else log(`Ошибка. obj.fields == null`);
+        } else log(`Ошибка. Данные не переданы на вход`);
+
+        //Smart_log(ln+`data ${JSON.stringify(current_issue_data)}`);
+    }
+    function SmartDlgSetButtonStateDisable(value){
+        $("#smart-dialog-create-button").prop('disabled', value);
+        $("#smart-dialog-cancel-button").prop('disabled', value);
+    }
+    function SmartDlgDisableCreateEpic(value){
+        if (value) {
+            let createEpicCheckBox = $('#smart_can_create_epic');
+            createEpicCheckBox.prop('checked',false);
+            createEpicCheckBox.prop('disabled',true);
+            $("#smart_epic_short_name").prop('disabled',true);
+        } else {
+            $('#smart_can_create_epic').prop('disabled',false);
+            $("#smart_epic_short_name").prop('disabled',false);
+        }
+    }
+    function SmartDlgGetProjectByTeam(value){
+        let result = "";
+
+        // определяем код проекта разработки Jira по коду команды
+        switch(value) {
+            case "SS": { result = "SS"; break; }
+            case "WARM": { result = "WARM"; break; }
+            case "SRCH": { result = "SRCH"; break; }
+            case "PLAT": { result = "PLAT"; break; }
+            case "SCHL": { result = "SCHL"; break; }
+            case "ESITE": { result = "ESITE"; break; }
+            case "DataPlatform": { result = "DP"; break; }
+            case "ERM": { result = "ARMSEL"; break; }
+            case "ARM": { result = "ARMAP"; break; }
+            case "SERVICE": { result = "FIRE"; break; }
+            case "PRNT": { result = "PRNT"; break; }
+            case "SEG": { result = "MP"; break; }
+            case "PERM": { result = "KONT"; break; }
+            case "XSUD": { result = "XSUD"; break; }
+        }
+        return result;
+    }
+    function SmartDlgCreateTasks(){
+        // формируем массив данных для создания задач
+        let tasks_data = [];
+        // получаем все елементы с данными (кроме эпика в проекте разработки)
+        let $newTaskNameElemenst = $(".smart-task-name");
+        if ($newTaskNameElemenst.length>0) {
+            // обходим только элементы с именем задачи и уже на основе их индекса работаем с другими
+            $newTaskNameElemenst.each(function(indx){
+                let index = $(this).attr("data-smart-id");
+                let issue_type = $(this).attr("data-issue-type");
+                let task_name = $(this).val(); if (task_name.length == 0) task_name = "Имя задачи не задано";
+                let task_estimate = $(`.${issue_type} .smart-task-estimate[data-smart-id="${index}"]`).val(); if (task_estimate.length == 0) task_estimate = 0; // $newTaskEstimateElemenst.find("#input_estm_subtask_backend*").length; //$(".edit-element[smart-index2='2']").length;   [data-smart-id="${index}"]
+                let task_assignee = $(`.${issue_type} .smart-task-assignee[data-smart-id="${index}"]`).val();
+                //Smart_log(`${ln} index ${index} task_name ${task_name} task_estimate ${task_estimate}`);
+                tasks_data.push({"issue_type":issue_type, "task_name":task_name, "task_estimate":task_estimate, "task_assignee":task_assignee, "params":{"project_type":"backlog"}});
+            });
+        }
+        // проверяем, не надо ли создать эпик в проекте разработки
+        if ($('#smart_can_create_epic').prop('checked')) {
+            let shortEpicName = $("#smart_epic_short_name").val();
+            if (shortEpicName.length == 0) shortEpicName = "Не задано";
+            tasks_data.push({"issue_type":"epic", "task_name":gc.current_issue_data.summary, "task_estimate":0, "params":{"project_type":"develop", "epicName":shortEpicName}});
+        }
+        // если есть задачи для создания
+        if (tasks_data.length >0 ) {
+            // блокируем кнопки до завершения создания задач
+            SmartDlgSetButtonStateDisable(true);
+            // отображаем прогресс бар и устанавливаем максимум
+            let smartDlgProgress = $("#smart-dialog-progress");
+            smartDlgProgress.attr("max",tasks_data.length);
+            smartDlgProgress.attr("value",0);
+            smartDlgProgress.show();
+
+            // считываем данные инициативы для дальнейшего использования в подзадачах
+            for (let task_data of tasks_data) {
+                // создаем сабтаски в инициативе и эпик в проекте разработки
+                SmartDlgCreateTask(task_data);
+            }
+        } else {
+            showFlag(`Добавьте данные для создания задач`,"Внимание!","info","auto");
+        }
+    }
+    function SmartDlgCreateTask(value){
+
+        let issueTypeId = "11001"
+        switch(value.issue_type) {
+            case "backend": {
+                issueTypeId = "11001";
+                break; }
+            case "frontend": {
+                issueTypeId = "11002";
+                break; }
+            case "req": {
+                issueTypeId = "11004";
+                break; }
+            case "test": {
+                issueTypeId = "11005";
+                break; }
+            case "design": {
+                issueTypeId = "11000";
+                break; }
+            case "epic": {
+                issueTypeId = "10000";
+                break; }
+        }
+
+        let newIssueData = {
+            "fields": {
+                "issuetype": {
+                    "id": issueTypeId
+                },
+                "summary":value.task_name
+            }
+        };
+        /*
+        ======================================================================================================================================================
+            TODO
+        ======================================================================================================================================================
+        5. почему то при смене команды повторно диалог не вызывается
+        */
+        /*
+    // маппинг компонентов на проекты Jira
+            def componentsProjectMap = [
+    "Справочные системы" : "SS",
+    "Горячая линия" : "PLAT",
+    "Календарь" : "PLAT",
+    "Личный кабинет" : "PLAT",
+    "Онлайн-помощник" : "PLAT",
+    "Актион 360" : "PLAT",
+    "ВебАРМ" : "WARM",
+    "ЕРМ Продавца" : "ARMSEL",
+    "Корпоративный портал" : "BITRIX",
+    "ГИС Контроль" : "GISCONTROL",
+    "Ассистент Поставщика" : "ARMPRO",
+    "Ассистент Заказчика" : "ARMCLIENT",
+    "Охрана Труда" : "AWFHSE",
+    "Рейтинг Поставщика" : "RGC",
+    "Проверка Контрагента" : "KONT",
+    "Поиск" : "SRCH",
+    "Правобот" : "FIRE",
+    "Школы" : "SCHL",
+    "Е-издания" : "ESITE",
+    "DataPlatform" :"DP",
+    "CRM" :"ARMAP"
+     "Маркетинговые сайты":"PRNT":"PRNT, GLAVBUKH, ERGLAV, DBAN, DIEGO, ASEH, ALEJANDRO, EJTOOL, TAGPROXY, MMT"
+    "Маркетинговая платформа":"SEG":"MP, PABLO, SEG, SUBSCR"
+                ]
+        */
+
+        switch(value.params.project_type) {
+            case "develop": {
+                newIssueData.fields["project"] = {"key": SmartDlgGetProjectByTeam(gc.current_issue_data.teamCode)};
+                newIssueData.fields["description"] = "Необходимо реализовать требования инициативы и конфлюенса";
+                //newIssueData.fields["priority"] = {"id": "10102"};
+                newIssueData.fields[gc.jira.fields.epicName] = value.params.epicName;
+                break; }
+            case "backlog": {
+                newIssueData.fields["project"] = {"key": gc.current_issue_data.projectKey};
+                newIssueData.fields["parent"] = {"key": gc.current_issue_data.key};
+                newIssueData.fields["timetracking"] = {"originalEstimate": value.task_estimate};
+                newIssueData.fields["description"] = "Планирование активности и ресурсов";
+                if (value.task_assignee.length > 0) newIssueData.fields["assignee"] = {"name": value.task_assignee};
+                if ('components' in gc.current_issue_data && gc.current_issue_data.components != null) newIssueData.fields["components"] = gc.current_issue_data.components;
+                if ('customfield_11601' in gc.current_issue_data && gc.current_issue_data.customfield_11601 != null) newIssueData.fields["customfield_11601"] = gc.current_issue_data.customfield_11601;
+                if ('customfield_11610' in gc.current_issue_data && gc.current_issue_data.customfield_11610 != null) newIssueData.fields["customfield_11610"] = gc.current_issue_data.customfield_11610;
+                if ('customfield_11504' in gc.current_issue_data && gc.current_issue_data.customfield_11504 != null) newIssueData.fields["customfield_11504"] = gc.current_issue_data.customfield_11504;
+                break; }
+        }
+
+        // создаем подзадачу
+        let url = new URL(gc.jira.urls.postIssue);
+        url.searchParams.set('AProcess', 'ABanner');
+        url.searchParams.set('ABProcess', 'SmartDlg');
+        url.searchParams.set('ADetail', 'CreateIssue');
+        $.ajax({
+            url: url, // указываем URL
+            type: "POST",
+            data: JSON.stringify(newIssueData), // данные, которые отправляем на сервер
+            //headers: headers,
+            //username: "",
+            //password: "",
+            contentType: "application/json; charset=utf-8",
+            //async: false,
+            //dataType: "json", // тип данных загружаемых с сервера
+            //processData: false,
+            success: function (data) {
+                //Smart_log(ln+`Результаты создания задачи`);
+                //Smart_log(ln+`data ${JSON.stringify(data)}`);
+                // Добавляем информацию по задаче
+                gc.current_issue_data.newIssueList.push({value, data});
+
+                // если успешно создали эпик, то надо его связать с инициативой
+                // напрашивается использование промисов, но не в этот раз
+                if (value.params.project_type == "develop") {
+                    let ajaxData = {};
+                    let searchParams = [];
+                    searchParams.push({"key":"AProcess", "value":"ABanner"});
+                    searchParams.push({"key":"ABProcess", "value":"SmartDlg"});
+                    searchParams.push({"key":"ADetail", "value":"CreateIssueLink"});
+                    let ajaxDataBody = {
+                        "type": {
+                            "name": "Developes"
+                        },
+                        "inwardIssue": {
+                            "key": gc.current_issue_data.key
+                        },
+                        "outwardIssue": {
+                            "key": data.key
+                        }
+                    };
+
+                    ajaxData["searchParams"] = searchParams;
+                    ajaxData["ajaxDataBody"] = ajaxDataBody;
+                    UCreateIssueLink(ajaxData);
+                }
+            },
+            error: function(textStatus){
+                showFlag(`${JSON.stringify(textStatus)}`,"Что-то пошло не так","error");
+                log(`Ошибка выполнения POST запроса`);
+                log(`url: ${url}`);
+                log(`${JSON.stringify(textStatus)}`);
+            },
+            complete: function(){
+                // актуализируем результат
+                SmartDlgProgressControl();
+            }
+        });
+        /*
+    {
+        "fields": {
+            "assignee": {
+                "name": "homer"
+            },
+            "reporter": {
+                "name": "smithers"
+            },
+            "priority": {
+                "id": "20000"
+            },
+            "labels": [
+                "bugfix",
+                "blitz_test"
+            ],
+            "timetracking": {
+                "originalEstimate": "10",
+                "remainingEstimate": "5"
+            },
+            "security": {
+                "id": "10000"
+            },
+            "versions": [
+                {
+                    "id": "10000"
+                }
+            ],
+            "environment": "environment",
+            "description": "description",
+            "duedate": "2011-03-11",
+            "fixVersions": [
+                {
+                    "id": "10001"
+                }
+            ],
+            "customfield_30000": [
+                "10000",
+                "10002"
+            ],
+            "customfield_80000": {
+                "value": "red"
+            },
+            "customfield_20000": "06/Jul/11 3:25 PM",
+            "customfield_40000": "this is a text field",
+            "customfield_70000": [
+                "jira-administrators",
+                "jira-software-users"
+            ],
+            "customfield_60000": "jira-software-users",
+            "customfield_50000": "this is a text area. big text.",
+            "customfield_10000": "09/Jun/81"
+        }
+    }
+        */
+    }
+    function UCreateIssueLink(value){
+        let url = new URL(gc.jira.urls.postIssueLink);
+        // добавляем параметры запроса, в том числе для идентификации в елке
+        if (value.searchParams.length > 0) {
+            for (let x of value.searchParams) {
+                url.searchParams.set(x.key, x.value);
+            }
+        }
+
+        $.ajax({
+            url: url, // указываем URL
+            type: "POST",
+            data: JSON.stringify(value.ajaxDataBody), // данные, которые отправляем на сервер
+            contentType: "application/json; charset=utf-8",
+            //async: false,
+            success: function (data) {
+            },
+            error: function(textStatus){
+                showFlag(`${JSON.stringify(textStatus)}`,"Не удаось связать эпик с инициативой","error");
+                log(`Ошибка выполнения POST запроса. Не удаось связать эпик с инициативой`);
+                log(`url: ${url}`);
+                log(`${JSON.stringify(textStatus)}`);
+            },
+            complete: function(){
+            }
+        });
+    }
+    function SmartDlgProgressControl(){
+        let smartDlgProgress = $("#smart-dialog-progress");
+        smartDlgProgress.attr("value",smartDlgProgress.attr("value")+1);
+
+        // если заполнили шкалу, то скрываем диалог и показываем результат
+        if (smartDlgProgress.attr("value") == smartDlgProgress.attr("max")) {
+            AJS.dialog2("#demo-dialog").hide();
+            log(`data ${JSON.stringify(gc.current_issue_data)}`);
+
+            // собираем задачки в список
+            let messageBody = '<ul>';
+            for (let task of gc.current_issue_data.newIssueList) {
+                messageBody += `<li><a href="${gc.jira.urls.viewIssue}${task.data.key}">${task.data.key} (${task.value.issue_type})</a></li>`;
+            }
+
+            messageBody += "</ul>";
+
+            showFlag(`${messageBody}`,"Успешно созданы задачи","success","manual");
+
+            // очистка данных для подготовки к следующему запуску
+            gc.current_issue_data.newIssueList = [];
+            gc.current_issue_data.components = [];
+            gc.current_issue_data.summary = "";
+            gc.current_issue_data.customfield_11601 = {};
+            gc.current_issue_data.customfield_11610 = {};
+            gc.current_issue_data.customfield_11504 = "";
+
+            // удаляем динамические элементы диалога
+            $(`.subtask`).remove();
+            // сбрасываем чекбокс эпика
+            $('#smart_can_create_epic').prop('checked',false);
+        }
+    }
+    function SmartDlgAddNewTask(taskType) {
+        let index = 0;
+        let preffix = '[X]';
+        switch(taskType) {
+            case "backend": {
+                gc.process.iniciativeSubtask.backend_count++;
+                index = gc.process.iniciativeSubtask.backend_count;
+                preffix = "[B]";
+                break; }
+            case "frontend": {
+                gc.process.iniciativeSubtask.frontend_count++;
+                index = gc.process.iniciativeSubtask.frontend_count;
+                preffix = "[F]";
+                break; }
+            case "req": {
+                gc.process.iniciativeSubtask.req_count++;
+                index = gc.process.iniciativeSubtask.req_count;
+                preffix = "[R]";
+                break; }
+            case "test": {
+                gc.process.iniciativeSubtask.test_count++;
+                index = gc.process.iniciativeSubtask.test_count;
+                preffix = "[T]";
+                break; }
+            case "design": {
+                gc.process.iniciativeSubtask.design_count++;
+                index = gc.process.iniciativeSubtask.design_count;
+                preffix = "[D]";
+                break; }
+        }
+        SmartDlgAddAnyTasks("subtask",taskType,index,`${preffix} ${gc.current_issue_data.summary}`);
+    }
+    function SmartDlgAddAnyTasks(classSubtask, classSubtaskDetail, count, taskName){
+        let id_postfix = `_${classSubtask}_${classSubtaskDetail}_${count}`
+        let class_name = `${classSubtask} ${classSubtaskDetail} ${classSubtaskDetail}_${count}`
+        // определяем группу полей
+        let $fieldset = $(`#fieldset_${classSubtaskDetail}`);
+        // добавляем общий div
+        //<form class="aui">
+        let $div = $('<form>').attr({
+            'id': 'form' + id_postfix,
+            'class': class_name+" aui"
+        });
+        $fieldset.append($div);
+        // добавляем в div строку ввода имени задачи
+        $div.append( SmartDlgCreateTaskNameElement(id_postfix, class_name+" edit-element smart-task-name", `${taskName} (${count})`,count,classSubtaskDetail) );
+        // добавляем в div строку ввода оценки задачи
+        $div.append( SmartDlgCreateTaskEstimateElement(id_postfix, class_name+" edit-element smart-task-estimate", count,classSubtaskDetail) );
+        // добавляем в div строку ввода ответственного за задачу
+        $div.append( SmartDlgCreateTaskAssigneeElement(id_postfix, class_name+" edit-element smart-task-assignee", count,classSubtaskDetail) );
+        // добавляем кнопку удаления группы элементов
+        $div.append( SmartDlgCreateBtnDeleteElement(id_postfix, class_name) );
+    }
+    function SmartDlgCreateTaskNameElement(postfix, className, taskName, index, issueType) {
+        let $element = $('<input>').attr({
+            'id': 'input_name' + postfix,
+            'class': className+" text long-field",
+            'type': 'text',
+            'value': taskName,
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            });;
+        return $element;
+    }
+    function SmartDlgCreateTaskEstimateElement(postfix, className, index, issueType) {
+        let $element = $('<input>').attr({
+            'id': 'input_estm' + postfix,
+            'class': className+" text short-field",
+            'type': 'number',
+            'min': '0',
+            'max': '240',
+            'placeholder': 'Оценка в часах',
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            });
+        return $element;
+    }
+    function SmartDlgCreateTaskAssigneeElement(postfix, className, index, issueType) {
+        let $element = $('<input>').attr({
+            'id': 'input_assignee' + postfix,
+            'class': className+" text medium-field",
+            'type': 'text',
+            'placeholder': 'Ответственный',
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            })
+            .attr({'autocomplete': 'on'
+            });
+        return $element;
+    }
+    function SmartDlgCreateBtnDeleteElement(postfix, className) {
+        let $element = $('<input>').attr({
+            id: 'btn' + postfix,
+            class: className + " btnDelete aui-button",
+            type: 'button',
+            value: 'Удалить'
+        })
+            .click(function() {
+                SmartDlgDeleteTaskElements(postfix);
+            });
+        /*var $div = $('<div>').attr({
+            'id': 'div' + postfix,
+            'class': className+" aui-buttons"
+        });
+        $div.append($element);*/
+        return $element;
+    }
+    function SmartDlgDeleteTaskElements(value) {
+        //alert(`${index} ${type}`);
+        $(`form#form${value}`).remove()
+    }
 })();
-// </script>
+//</script>
