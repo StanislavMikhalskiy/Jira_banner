@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.3'
+    const script_version = '1.7'
     const environment = "TEST"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -44,7 +44,19 @@
             "searchIssue":gc.jira.mainUrl+"/rest/api/2/search", // gc.jira.urls.searchIssue
             "postIssueBulk":gc.jira.mainUrl+"/rest/api/2/issue/bulk/", // gc.jira.urls.postIssueBulk
             "postIssueLink":gc.jira.mainUrl+"/rest/api/2/issueLink/", // gc.jira.urls.postIssueLink
-            "postTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/"
+            "postTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/",
+            "getTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/"
+        }
+        gc.jira['elements'] = { // gc.jira.elements.
+            "epicTaskListElemSpanId":"epicTaskListElemSpanId",
+            "epicTableNewRowHeaderId":"epicTableNewRowHeaderId",
+            "epicTableNewRowBottomId":"epicTableNewRowBottomId",
+            "activeSprintGridIssueClass":"js-issue",
+            "activeSprintGridIssueAttribute":"data-issue-key",
+            "extraFieldsParentClass":"ghx-plan-extra-fields",
+            "stateCustomClass":"sfaulunsad",
+            "extraEpicPanelClass":"ghx-row-version-epic-subtasks",
+            "extraFieldEstimateClass":"ghx-extra-field-estimate"
         }
         gc.jira['fields'] = {
             "epicLink":"customfield_10100", // gc.jira.fields.epicLink
@@ -112,25 +124,29 @@
             }
         }
         gc['current_issue_data'] = {}
-        gc['process'] = {}
         // фиксируем параметры URL
-        //urlParams();
         gc['urlParams'] = new URLSearchParams(document.location.search);
         // кнопки, которые добавлены через ScriptRunner и на которые вешаем обработчики
         gc['jiraButton'] = [
             { "key":"addNewSystem", "value":"ss-new-system-js", "isEventAdded":false, "tryAddEventCount":0},
             { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0}]
+        gc['process'] = {}
 
+        // настройки для процесса showStatesInBacklog
+        gc.process["showStatesInBacklog"] = {
+            "canShow":false,
+            "refreshStopped":true, // определяет возможность обновления статусов
+            "countUpdate":0 // вычисляет кол-во обновлений статусов на доске бэклога
+        }
+        //
+        gc.process["sprintResourceCalc"] = {
+            "toolsTableButtonStartCalculationId":'toolsTableButtonStartCalculation'+environment
+        }
         // подписываемся на события
         document.addEventListener("DOMContentLoaded", DOMContentLoaded());
+
         $(document).ajaxComplete(FajaxComplete);
         log(`Скрипт успешно подключен. Версия ${script_version}`);
-        /*
-        $(document).ajaxComplete(function(event, xhr, settings) {
-        if ( settings.url === "ajax/test.html" ) {
-            $( ".log" ).text( "Triggered ajaxComplete handler. The result is " +
-                     xhr.responseHTML );}});
-        */
     }
     function DOMContentLoaded(){
         getPermissions();
@@ -140,12 +156,22 @@
         gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
         // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
         if (environment == "DEV") createDebugMenu();
+
+        // добавляем кнопку на эпик для получения оценки по задачам
+        setTimeout(EpicTasksAddListButtonCalc, 500); log(`Запуск setTimeout(EpicTasksAddListButtonCalc)`);
+        // скрываем расширения для задачи списка задач бэклога
+        if (gc.urlParams.has("rapidView")) {
+            switch(gc.urlParams.get("rapidView")) {
+                case "136": {
+                    gc.process.showStatesInBacklog.canShow = true;
+                    gc.process.showStatesInBacklog.refreshStopped = false;
+                    HideExtendedBacklogTasksPanel();
+                    break;
+                }
+            }
+        }
     }
-    /*function urlParams(){
-        //var paramsString = document.location.search;
-        // var searchParams = new URLSearchParams(paramsString);
-        gc['urlParams'] = new URLSearchParams(document.location.search);
-    }*/
+
     // построение меню отладки для разработки
     function createDebugMenu(){
         let styles = `
@@ -277,15 +303,13 @@
                             SmartDlgAddBodyHTML();
                             $jButton.click(function() { SmartDlgShow() });
                             gc.current_issue_data['isSmartDlgFirst'] = true;
-                            gc.process = {
-                                "iniciativeSubtask":{
+                            gc.process["iniciativeSubtask"] = {
                                     "backend_count":0,
                                     "frontend_count":0,
                                     "req_count":0,
                                     "test_count":0,
                                     "design_count":0
-                                }
-                            }
+                                     }
                             break; }
                         case "addNewSystem": {
                             //$jButton.click(function() { showFlag('message', 'title'); });
@@ -319,33 +343,44 @@
     }
     // запуск обработчиков при ajax-изменения на странице
     function FajaxComplete(){
-        //log(`FajaxComplete`);
         fillKanbanCard();
         // проверяем подписки на события
         AddEventToButton();
+        // обновление статусов задач в списке бэклога
+        if (gc.process.showStatesInBacklog.canShow) {
+            if (!gc.process.showStatesInBacklog.refreshStopped) {
+                setTimeout(GetIssueStates, 200);
+                gc.process.showStatesInBacklog.refreshStopped = true;
+            }
+        }
     }
     // получить разрешения для команд
     function getPermissions(){
         // считываем настройки по командам
-        var prTeamsConfigData =  getIssue("PSQL-222","description");
+        let prTeamsConfigData =  getIssue("PSQL-222","description");
         prTeamsConfigData.then(
             result => {
-                var obj = JSON.parse(result);
+                let obj = JSON.parse(result);
                 if ('fields' in obj && obj.fields != null) {
                     if ('description' in obj.fields && obj.fields.description != null) {
+                        let objTeamPermissions = [];
                         // очистка данных
-                        var x = JSON.stringify(obj.fields.description).replace(/{code:json}|{code}|\\r|\\n|\\/g, '');
+                        let x = JSON.stringify(obj.fields.description).replace(/{code:json}|{code}|\\r|\\n|\\/g, '');
                         x = x.replace(/"\[{/g, '[{');
                         x = x.replace(/}\]"/g, '}]');
-                        var teamsData = JSON.parse(x);
+                        let teamsData = JSON.parse(x);
                         // обходим полученный массив комманд
                         for (let teamData of teamsData) {
                             //log(`teamData.rapidView ${teamData.rapidView}`);
-                            /*if ('rapidView' in teamData && teamData.rapidView != null && teamData.rapidView==config.rapidView) {
-                                //log.info(`Нашли команду ${JSON.stringify(teamData.team)}`);
-                                getWorkTime(teamData.team);
-                                break;
-                            }*/
+
+                            if ('rapidView' in teamData && teamData.rapidView != null && gc.urlParams.has("rapidView") && teamData.rapidView == gc.urlParams.get("rapidView")) {
+                                objTeamPermissions.push(teamData);
+                                log("+1");
+                            }
+                        }
+                        // если разрешения были получены - запускаем обработчики правил
+                        if (objTeamPermissions.length>0) {
+                            setTimeout(ApplyRules, 200, objTeamPermissions); log(`Запуск setTimeout(ApplyRules)`);
                         }
                         //log.warn(`Данные по команде не получены`);
                     } else log(`Нет данных по полю "description"`);
@@ -355,6 +390,44 @@
                 log(`Не удалось считать настройки по командам`);
             }
         )
+    }
+    function ApplyRules(objTeamPermissions){
+        for (let objPermission of objTeamPermissions) {
+            let tDelay = 200;
+            if ( 'processes' in objPermission && objPermission.processes !== null && objPermission.processes.length > 0) {
+                // обходим массив процессов
+                for (let process of objPermission.processes) {
+                    //Smart_log(`${ln} process.key= ${process.key}`);
+                    switch(process.key) {
+                        case "ViewEstimationsOnPlaning": {
+                            setTimeout(ApplyRuleViewEstimationsOnPlaning, tDelay, objPermission);
+                            break; }
+                    }
+                }
+            } else log(`Данные по доступным процессам не получены. Проверьте в конфиге секцию process`);
+        }
+    }
+    function ApplyRuleViewEstimationsOnPlaning(objPermission){
+        // добавляем на панель кнопку запуска расчета
+        let toolsTable = document.getElementById("ghx-modes-tools");
+        if (toolsTable !== null) {
+            let toolsTableButtonStartCalculation = document.getElementById(gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId);
+            if (toolsTableButtonStartCalculation === null) {
+                toolsTableButtonStartCalculation = document.createElement('button');
+                toolsTableButtonStartCalculation.id = gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId;
+                toolsTableButtonStartCalculation.innerHTML = "Расчет";
+                toolsTableButtonStartCalculation.onclick = function() { CalcWorkloadFutureSprint(objPermission); }
+                toolsTableButtonStartCalculation.className="aui-button";
+                //toolsTableButtonStartCalculation.style.display = "inline";
+                //toolsTableButtonStartCalculation.style.border = "1px solid black";
+                toolsTableButtonStartCalculation.style.marginLeft = "5px"
+                //toolsTableButtonStartCalculation.style.padding = "5px"
+                //toolsTableButtonStartCalculation.style.color = "black"
+                // проверяем, что будущий спринт существует. Если его нет, то дизейблим кнопку
+                //if (GetFutureSprintId() == -1 ) toolsTableButtonStartCalculation.disabled = true;
+                toolsTable.appendChild(toolsTableButtonStartCalculation);
+            }
+        }
     }
     // возвращает объект запрошенной задачи
     function getIssue(issueCode,fields){
@@ -515,6 +588,59 @@
             )
         })
     }
+    // непоянтно - общая задача или нет
+    // ToDo: Выпилить!
+    function GetIssueTimetracking(issueKey){
+        let result;
+
+        let url = new URL(gc.jira.urls.getTimeTracking+issueKey); // "/rest/api/2/issue/"
+        url.searchParams.set('fields', 'description');
+        url.searchParams.set('CustomSource', 'AB_GetIssueTimetracking');
+
+        let xhr = new XMLHttpRequest();
+        xhr.open("GET", url, false);
+        //xhr.setRequestHeader('SOAPAction', 'AnnouncementBanner');
+
+        xhr.send();
+        //Smart_log(ln+xhr.status); // Равен кодам HTTP (200 - успешно, 404 не найдено, 301 - перенесено навсегда)
+        //Smart_log(ln+xhr.statusText);
+        //Smart_log(ln+xhr.responseText);
+
+        // 4. Этот код сработает после того, как мы получим ответ сервера
+        //xhr.onload = function() { // только для асинхронки
+        if (xhr.status != 200) { // анализируем HTTP-статус ответа, если статус не 200, то произошла ошибка
+            //Smart_log(ln+`Ошибка ${xhr.status}: ${xhr.statusText}`);
+        } else { // если всё прошло гладко, выводим результат
+            //Smart_log(ln+`Готово, получили ${xhr.response.length/1024} Kбайт`);
+            result = xhr.responseText;
+        }
+        //};
+        return result;
+    }
+    // ToDo: Выпилить!
+    function GetIssuesByQuery(jqlQuery, searchParams){
+        let result = null;
+        let url = new URL(gc.jira.urls.searchIssue );
+        if (searchParams) {
+            for (let x of searchParams) {
+                url.searchParams.set(x.key, x.value);
+                //Smart_log(ln+`x.key: ${x.key} x.value: ${x.value}`);
+            }
+        }
+        url.searchParams.set('CustomSource', 'AB_GetIssuesByQuery'); // CustomSource=AnnouncementBanner CustomSource=AB_GetIssueTimetracking CustomSource=AB_GetIssue CustomSource=AB_GetIssueByParams CustomSource=AB_GetIssuesByQuery
+        //Smart_log(ln+`url: ${url}`);
+
+        let xhr = new XMLHttpRequest();
+        xhr.open("GET", url, false);
+        xhr.send();
+        if (xhr.status != 200) { // анализируем HTTP-статус ответа, если статус не 200, то произошла ошибка
+            //Smart_log(ln+`Ошибка ${xhr.status}: ${xhr.statusText}`);
+        } else { // если всё прошло гладко, выводим результат
+            //Smart_log(ln+`Готово, получили ${xhr.response.length/1024} Kбайт`);
+            result = xhr.responseText;
+        }
+        return result;
+    }
 
     function testAlert(){
         alert("Test");
@@ -528,6 +654,322 @@
                 showFlag(`Ошибка корректировки времени`,"Внимание!","error");
             })*/
     }
+
+    /*
+        Расчет загрузки будущего спринта
+    */
+    // получаем будущий спринт I
+    function GetFirstFutureSprintByHtmlAsElement(){
+        let result = null;
+        let elFutureSprints = document.getElementsByClassName("ghx-backlog-container ghx-sprint-planned js-sprint-container");
+        if (elFutureSprints !== null && elFutureSprints.length>0) {
+            result = elFutureSprints[0];
+        } else log("Будущий спринт не найден");
+        return result;
+    }
+    // получаем будущий спринт II
+    function GetFutureSprintId(){
+        let result = -1;
+        let elFutureSprint = GetFirstFutureSprintByHtmlAsElement();
+        if (elFutureSprint !== null) {
+            let futureSprintId = elFutureSprint.getAttribute("data-sprint-id");
+            if (futureSprintId !== null) {
+                result = futureSprintId
+            }
+        }
+        return result
+    }
+    // старт расчета, делаем индикацию начала работы
+    function CalcWorkloadFutureSprint(objPermission){
+        let toolsTableButtonStartCalculation = document.getElementById(gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId);
+        if (toolsTableButtonStartCalculation !== null) {
+            toolsTableButtonStartCalculation.style.backgroundColor = "#ff7a83"
+        }
+        setTimeout(CalcWorkloadFutureSprintMain, 200, objPermission);
+    }
+    function ParseRoleLogin(value){ // value: "Role: 10206 (cherkasov)"
+        let result='';
+
+        let posBegin = value.indexOf("(");
+        if ( posBegin > 0) {
+            let posEnd = value.indexOf(")");
+            if ( (posEnd-posBegin) > 1 ) {
+                result = value.substring(posBegin+1,posEnd);
+            }
+        }
+
+        return result;
+    }
+    function ParseRoleCode(value){ // value: "Role: 10206 (cherkasov)"
+        let result='';
+
+        let posBegin = value.indexOf(":");
+        if ( posBegin > 0) {
+            let posEnd = value.indexOf("(");
+            result = (value.substring(posBegin+1,posEnd)).trim();
+        }
+
+        return result;
+    }
+    function UpdateEstimateInfoByDeveloper(developersEstimates) {
+        if ( developersEstimates.length > 0 ) {
+            // выводим оценки на панель в рамках социальной ответственности
+            for (let developerEstimate of developersEstimates) {
+                let estimate = developerEstimate.estimate/60/60;
+                let templateValue = estimate.toFixed(1);
+                let color = "black";
+                let bgColor = "";
+                // если превышено доступное время
+                if (estimate > 25) color = "red";
+                // если есть задачи без оценки
+                if (developerEstimate.hasTaskWithoutEstimate) bgColor = "yellow";
+
+                SetElementEstimateInfoByDeveloper(developerEstimate.dataFilterId,templateValue, color,bgColor);
+            }
+        }
+    }
+    function SetElementEstimateInfoByDeveloper(elParentAttr,value,color, bgColor){
+        let elParent = document.querySelector(`[data-filter-id="${elParentAttr}"]`);
+        //Smart_log(ln+`[data-filter-id=${elem_attribyte_value}]`);
+        if (elParent) {
+            let templateDIVId = `div${elParentAttr}`;
+            let elCustomEstimation = document.getElementById(templateDIVId);
+            if (elCustomEstimation === null) {
+                elCustomEstimation = document.createElement('div');
+                elCustomEstimation.id = templateDIVId;
+                elCustomEstimation.innerHTML = value;
+                //elCustomEstimation.style.display = "inline";
+                elCustomEstimation.style.border = "1px solid black";
+                elCustomEstimation.style.marginTop = "5px"
+                elCustomEstimation.style.padding = "5px"
+                elCustomEstimation.style.color = "black"
+                //elCustomEstimation.style.backgroundColor = bgColor;
+                elParent.appendChild(elCustomEstimation);
+            } else {
+                elCustomEstimation.innerHTML = value;
+
+            }
+            elCustomEstimation.style.color = color;
+            elCustomEstimation.style.backgroundColor = bgColor;
+        } else {
+            log(`Элемент [data-filter-id="${elParentAttr}"] не найден`);
+        }
+    }
+    function UpdateEstimateInfoByRole(rolesEstimates) {
+        if ( rolesEstimates.length > 0 ) {
+            // выводим оценки на панель в рамках социальной ответственности
+            for (let roleEstimate of rolesEstimates) {
+                let estimate = (roleEstimate.estimate > 0) ? (roleEstimate.estimate/60/60).toFixed(0) : "0";
+                let templateValue = "";
+                switch(roleEstimate.key) {
+                    case "QA": {
+                        templateValue = estimate;
+                        break; }
+                    case "Developers": {
+                        let estimateUnnassigneeDev = (roleEstimate.unnassigneeDev > 0) ? (roleEstimate.unnassigneeDev/60/60).toFixed(0) : "0";
+                        templateValue = `${estimate}/${estimateUnnassigneeDev}`;
+                        break; }
+                }
+                let color = "black";
+                //if (estimate > 25) color = "red";
+                //Smart_log(`${ln} roleEstimate.key = ${roleEstimate.key},roleEstimate.estimate = ${roleEstimate.estimate},roleEstimate.unnassigneeDev = ${roleEstimate.unnassigneeDev}`);
+                SetElementEstimateInfoByDeveloper(roleEstimate.dataFilterId,templateValue, color,"");
+            }
+        }
+    }
+    // расчет загрузки
+    function CalcWorkloadFutureSprintMain(objPermission){
+        // получаем будущий спринт
+        let futureSprintId = GetFutureSprintId(); //2737
+        if (futureSprintId > -1) {
+
+            let jqlQuery = `Sprint =${futureSprintId} and status != Closed `;
+            let requestParams = [{key:'maxResults',value:'150'},{key:'jql',value:jqlQuery},{key:'fields',value:'assignee,customfield_11304'},{key:'Detail',value:'CalcWorkloadfutureSprint'}];
+            // получаем результаты запроса - массив задач
+            let objIssues = JSON.parse(GetIssuesByQuery(jqlQuery,requestParams));
+            //Smart_log(`${ln} objIssues = ${JSON.stringify(objIssues)}`);
+
+            if (objIssues) {
+                if ('total' in objIssues && objIssues.total > 0) {
+                    let futureSprintTasks = [];
+                    // обходим полученные задачи
+                    for (let objIssue of objIssues.issues) {
+                        let assignee = "";
+                        if ( 'assignee' in objIssue.fields && objIssue.fields.assignee !== null && 'key' in objIssue.fields.assignee ) {
+                            assignee=objIssue.fields.assignee.key
+                        } else {
+                            log(`У задачи ${objIssue.key} не указан assignee`);
+                        };
+                        let sprintTaskInfo = {
+                            issueKey:objIssue.key,
+                            assignee:assignee,
+                            roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                        }
+                        // обрабатывам роли из задачи
+                        if ( 'customfield_11304' in objIssue.fields && objIssue.fields.customfield_11304 !== null) {
+                            for (let roleCustomField of objIssue.fields.customfield_11304) {
+                                let roleLogin = ParseRoleLogin(roleCustomField);
+                                //Smart_log(`${ln} ParseRoleLogin = ${roleLogin}, roleCustomField = ${roleCustomField}`);
+                                let roleCode = ParseRoleCode(roleCustomField);
+                                //Smart_log(`${ln} ParseRoleCode = !${roleCode}!`);
+
+                                switch(roleCode) {
+                                    case "10206": {
+                                        for(let role of sprintTaskInfo.roles) {
+                                            if (role.key == "Developers") { role.assignee = roleLogin }
+                                        }
+                                        break;
+                                    }
+                                    case "10404": {
+                                        for(let role of sprintTaskInfo.roles) {
+                                            if (role.key == "QA") { role.assignee = roleLogin }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        //Smart_log(`${ln} sprintTaskInfo.issueKey: ${sprintTaskInfo.issueKey} sprintTaskInfo.assignee: ${sprintTaskInfo.assignee} sprintTaskInfo.roles[0]: ${sprintTaskInfo.roles[0].key} ${sprintTaskInfo.roles[0].assignee} sprintTaskInfo.roles[1]: ${sprintTaskInfo.roles[1].key} ${sprintTaskInfo.roles[1].assignee}`);
+                        /*
+                        customfield_11304": [
+                                  "Role: 10206 (cherkasov)",
+                                  "Role: 10404 (kusakin)",
+                                  "Role: 10900 (a.ivanov)"
+                                ]
+                        */
+                        // добавляем данные по задачам в массив
+                        futureSprintTasks.push(sprintTaskInfo);
+                        //Smart_log(`${ln} sprintTaskInfo.issueKey = ${sprintTaskInfo.issueKey}, sprintTaskInfo.key = ${sprintTaskInfo.assignee}`);
+                    }
+
+                    if (futureSprintTasks.length>0) {
+                        // для каждой задачи получаем информацию по оценке
+                        for (let futureSprintTask of futureSprintTasks) {
+                            //Smart_log(`${ln} для каждой задачи получаем информацию по оценке futureSprintTask.issueKey = ${futureSprintTask.issueKey}`);
+                            let objIssueTimetracking = JSON.parse(GetIssueTimetracking(futureSprintTask.issueKey));
+                            if (objIssueTimetracking) {
+                                //Smart_log(`${ln} objIssueTimetracking = ${JSON.stringify(objIssueTimetracking)}`);
+                                if ('estimates' in objIssueTimetracking) {
+                                    if (objIssueTimetracking.estimates.length > 0) {
+                                        // обходим имеющиеся оценки
+                                        for(let r=0; r<objIssueTimetracking.estimates.length; r++) {
+                                            for(let ro=0; ro<futureSprintTask.roles.length; ro++) {
+                                                //Smart_log(ln+` ${futureSprintTask.issueKey} ${objIssueTimetracking.estimates[r].role} ${futureSprintTask.roles[ro].key}`);
+                                                if (objIssueTimetracking.estimates[r].role == futureSprintTask.roles[ro].key)
+                                                {
+                                                    if ("remainingEstimateSeconds" in objIssueTimetracking.estimates[r]) { // originalEstimateSeconds
+                                                        futureSprintTask.roles[ro].estimate = objIssueTimetracking.estimates[r].remainingEstimateSeconds;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else log(`отсутствуют данные objIssueTimetracking`);
+                                } else log(`отсутствуют данные estimates (issueKey=${objIssueTimetracking.key})`);
+                            } else log(`GetIssueTimetracking - данные не были получены (issueKey=${futureSprintTask.issueKey})`);
+                        }
+                        // вывод данных в лог для отладки
+                        /*for (let futureSprintTask of futureSprintTasks) {
+                            Smart_log(ln+`issueKey: ${futureSprintTask.issueKey}, assignee: ${futureSprintTask.assignee}`);
+                            for (let role of futureSprintTask.roles) {
+                                Smart_log(ln+`role.key: ${role.key}, role.assignee: ${role.assignee}, role.estimate: ${role.estimate}`);
+                            }
+                        }*/
+                        // objPermission - данные по разработчикам
+                        // формируем массив с суммой оценок по каждому разработчику
+                        let developersEstimates = [];
+                        if ('team' in objPermission && objPermission.team != null && objPermission.team.length > 0) {
+                            for (let developer of objPermission.team) {
+                                let developerInfo = {
+                                    key:developer.key,
+                                    estimate:0,
+                                    dataFilterId:developer.dataFilterId,
+                                    role:developer.role,
+                                    hasTaskWithoutEstimate:false
+                                }
+                                //Smart_log(ln+`developerInfo.key = ${developerInfo.key}, developerInfo.dataFilterId = ${developerInfo.dataFilterId}, developerInfo.role = ${developerInfo.role}`);
+                                // получаем массив задач, назначенный на разработчика
+                                let assigneeTasks = futureSprintTasks.filter(issue => issue.assignee === developer.key)
+                                if (!!assigneeTasks && assigneeTasks.length>0) {
+                                    // обходим массив отфильтрованных задач по assignee
+                                    for (let task of assigneeTasks) {
+                                        // roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                                        // обходим массив ролей в задаче
+                                        for (let taskRole of task.roles) {
+                                            if (taskRole.key == developerInfo.role) {
+                                                if (taskRole.estimate>0) {
+                                                    developerInfo.estimate += taskRole.estimate;
+                                                }
+                                                else {
+                                                    developerInfo.hasTaskWithoutEstimate = true;
+                                                    log(`task.key = ${task.issueKey}, task.remainingEstimate = ${taskRole.estimate}, task.assignee = ${task.assignee}`);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                developersEstimates.push(developerInfo);
+                            }
+                            UpdateEstimateInfoByDeveloper(developersEstimates);
+
+                        } else log(`Нет данных по разработчикам. Проверьте конфиг в задаче`);
+                        // формируем данные по ролям
+                        let rolesEstimates = [];
+                        if ('summaryByRoles' in objPermission && objPermission.summaryByRoles != null && objPermission.summaryByRoles.length > 0) {
+                            for (let role of objPermission.summaryByRoles) { // TO-DO: лишний цикл, кажись. Можно сразу по объекту идти в цикле ниже и там уже заполнять массив
+                                let roleInfo = {
+                                    key:role.key,
+                                    estimate:0,
+                                    unnassigneeDev:0,
+                                    dataFilterId:role.dataFilterId
+                                }
+                                //Smart_log(ln+`roleInfo.key = ${roleInfo.key}, roleInfo.dataFilterId = ${roleInfo.dataFilterId}`);
+                                rolesEstimates.push(roleInfo);
+                            }
+                            for (let futureSprintTask of futureSprintTasks) {
+                                for (let roleEstimates of rolesEstimates) {
+                                    for (let taskRole of futureSprintTask.roles) {
+                                        if (taskRole.key == roleEstimates.key) {
+                                            if (taskRole.estimate>0) roleEstimates.estimate += taskRole.estimate;
+                                            //Smart_log(ln+`futureSprintTask.issueKey = ${futureSprintTask.issueKey}, taskRole.key = ${taskRole.key}, taskRole.estimate = ${taskRole.estimate}, roleEstimates.key = ${roleEstimates.key}`);
+                                            // обработка задач для роли Developers, у которых не назначен assignee
+                                            // считаем сумму часов для этой роли
+                                            if (taskRole.key == "Developers") {
+                                                if (futureSprintTask.assignee == "") {
+                                                    roleEstimates.unnassigneeDev += taskRole.estimate;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // выводим результат
+                            UpdateEstimateInfoByRole(rolesEstimates);
+                        }
+                    }
+                } else log(`Нет данных по задачам`);
+            } else log(`Объект objIssues не получен`);
+            /**/
+            //alert(`futureSprintId = ${obj}`);
+            //Smart_log(`${ln} obj = ${obj}`);
+
+            // удаляем индикатор
+            let toolsTableButtonStartCalculation = document.getElementById(gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId);
+            if (toolsTableButtonStartCalculation !== null) {
+                toolsTableButtonStartCalculation.style.backgroundColor = "#ECEDF0"
+            }
+
+        } else log(`Не найден futureSprintId`);
+    }
+
+    // скрываем расширения для задачи списка задач бэклога
+    function HideExtendedBacklogTasksPanel(){
+        // скрываем доп. информацию в строке задачи
+        $("head").append($("<style type='text/css'>.ghx-issue-compact .ghx-plan-extra-fields.ghx-plan-extra-fields.ghx-row {display: none;} .ghx-extra-field {display: none;} </style>"));
+        //$("head").append($("<style type='text/css'> ghx-extra-field {display: none;} </style>"));
+
+        // в задачах без фикс и эпика добавляем div и и переносим узел с assigne и оценкой
+
+    }
     // цветовая заливка карточек на канбан-доске
     function fillKanbanCard(){
         // проверяем, что мы на доске
@@ -536,27 +978,117 @@
             return;
         } else {
             // проверяем, что мы на нужной доске
-            if ( gc.urlParams.get("rapidView") !== "746") return; // 746
+            if ( gc.urlParams.get("rapidView") !== "136") return; // 746
         }
 
         // ищем карты по доске
-        var $cards = $(".js-detailview");
+        let $cards = $(".js-detailview");
         //log(`cards.length ${$cards.length} `);
         if ($cards.length > 0) {
             $cards.each(function(indx){
                 // ищем элемент ghx-grabber
-                var cardGrabberColor = $(this).children(".ghx-grabber").css('background-color');
+                let cardGrabberColor = $(this).children(".ghx-grabber").css('background-color');
                 if ( cardGrabberColor !== 'rgb(238, 238, 238)' ) {
                     $(this).css('background-color',cardGrabberColor)
                 };
             })
         }
     }
+    //
+    function GetIssueStates (){
+        let canIncrement = false;
 
+        // ищем блоки с активными спринтами
+        /*var activeSprintGrids = document.getElementsByClassName(activeSprintGridClass);
+        if (activeSprintGrids.length < 1) {
+            Log(ln+"Не найдены активные спринты");
+        }
+        else
+        {*/
+        //Log(ln+"Найдены активные спринты ("+activeSprintGrids.length+")");
+        // обходим активные спринты
+        //for( var activeSprintGrid, i = 0; activeSprintGrid = activeSprintGrids[i++]; ) {
+        let activeSprintGridIssues = document.getElementsByClassName(gc.jira.elements.activeSprintGridIssueClass);
+        //log("Найдено элементов в активном спринте ("+activeSprintGridIssues.length+")");
+        // обходим задачи в спринте
+        for( let activeSprintGridIssue, j = 0; activeSprintGridIssue = activeSprintGridIssues[j++]; ) {
+            let issueKey = activeSprintGridIssue.getAttribute(gc.jira.elements.activeSprintGridIssueAttribute);
+            //log("issueKey "+issueKey);
+
+            // ищем расширение информации по задаче в гриде
+            let extraFieldsParent = activeSprintGridIssue.children[0].getElementsByClassName(gc.jira.elements.extraFieldsParentClass);
+            //Log(ln+"extraFieldsParent "+extraFieldsParent.length);
+            if (extraFieldsParent.length <1) {
+                //Log(ln+"Наш класс отсутствует"+extraFieldsParentClass);
+            } else
+            {
+                //Log(ln+"Наш класс на месте "+extraFieldsParentClass);
+                let extraFieldsClasses = activeSprintGridIssue.children[0].getElementsByClassName("ghx-extra-field");
+                // ищем дочерние с данными
+                if (extraFieldsClasses.length >0) {
+                    let stateName;
+                    // ищем статус
+                    for( let extraFieldsClassChildren, k = 0; extraFieldsClassChildren = extraFieldsClasses[k++]; ) {
+                        let extraFieldAttribute = extraFieldsClassChildren.getAttribute("data-tooltip");
+                        if (extraFieldAttribute.indexOf("Status:")>=0) {
+                            stateName = extraFieldAttribute.slice(8);
+                            //Log(ln+"stateName = "+stateName);
+                            break;
+                        }
+                        log("Атрибуты "+extraFieldAttribute);
+                    }
+                    // если нашли статус
+                    if (stateName) {
+                        // ищем кастомный класс со статусом
+                        let stateCustomClasses = activeSprintGridIssue.children[0].children[1].getElementsByClassName(gc.jira.elements.stateCustomClass);
+                        if (stateCustomClasses.length >=1) {
+                            // статус мы уже добавили
+                            // хорошо бы обновлять статус
+                        } else
+                        {
+                            // есть задачи без fix version и epic, у них другая структура классов
+                            // надо в ghx-issue-content
+                            // создать ghx-end ghx-row ghx-row-version-epic-subtasks
+                            // и переместить туда ghx-end ghx-extra-field-estimate
+                            //
+                            // статус еще не добавляли, делаем
+                            let e = document.createElement('span');
+                            e.className = "aui-label ghx-label ghx-label-double ghx-label-4 "+gc.jira.elements.stateCustomClass;
+                            e.innerHTML = stateName;
+                            e.style.marginLeft = "10px";
+
+                            let extraEpicPanel = activeSprintGridIssue.children[0].getElementsByClassName(gc.jira.elements.extraEpicPanelClass);
+                            //Log(ln+"epicPanel.length "+extraEpicPanel.length);
+                            if (extraEpicPanel.length > 0) {
+                                activeSprintGridIssue.children[0].children[1].appendChild(e);
+                            } else{
+                                let newPanel = document.createElement('div');
+                                newPanel.className = "ghx-row-version-epic-subtasks";
+                                //newPanel.innerHTML = stateName;
+                                newPanel.style.display = "inline";
+                                activeSprintGridIssue.children[0].appendChild(newPanel);
+                                //
+                                let extraFieldEstimate = activeSprintGridIssue.children[0].children[1].getElementsByClassName(gc.jira.elements.extraFieldEstimateClass);
+                                extraFieldEstimate[0].style.display = "inline";
+                                newPanel.append(extraFieldEstimate[0]);
+
+                                activeSprintGridIssue.children[0].children[2].children[0].appendChild(e);
+                            }
+                            canIncrement = true;
+                        }
+                    }
+                }
+            }
+        }
+        //}
+        //}
+        if (canIncrement) gc.process.showStatesInBacklog.countUpdate++;
+        gc.process.showStatesInBacklog.refreshStopped = false;
+    }
     /*
-    Пул задач для заведения новой справочной системы
-    Цель процесса - автоматизированное заведение скопа задач в несколько команд для создания новой системы/издания в Справочных
-    Процесс запускается из эпика бэклога при условии, что в компоненте указаны "Справочные системы"
+        Пул задач для заведения новой справочной системы
+        Цель процесса - автоматизированное заведение скопа задач в несколько команд для создания новой системы/издания в Справочных
+        Процесс запускается из эпика бэклога при условии, что в компоненте указаны "Справочные системы"
     */
     function cns_createNewSystem(){
         log(`Запускаем создание новой системы ${gc.current_issue_data.key}`);
@@ -1491,7 +2023,9 @@ where p.pub_id = 9\n
         }
     }
 
-    /*SMART-диалог для создания подзадач в инициативе*/
+    /*
+        SMART-диалог для создания подзадач в инициативе
+    */
     function SmartDlgAddBodyHTML(){
         let dialog = `
 <section id="demo-dialog" class="aui-dialog2 aui-dialog2-xlarge aui-layer demo-dialog-smart" role="dialog" aria-hidden="true">
@@ -2172,6 +2706,160 @@ where p.pub_id = 9\n
     function SmartDlgDeleteTaskElements(value) {
         //alert(`${index} ${type}`);
         $(`form#form${value}`).remove()
+    }
+
+    // кнопка подсчета стоимости задач в эпике
+    function EpicTasksAddListButtonCalc(){
+        let epicPanel = document.getElementById("greenhopper-epics-issue-web-panel");
+        if (epicPanel == null) { log("Не нашли epicPanel в документе")
+        } else {
+            let epicPanelHeader = document.getElementById("greenhopper-epics-issue-web-panel_heading");
+            if (epicPanelHeader == null) { log("Не нашли epicPanelHeader в документе")
+            } else {
+                let epicTaskList = epicPanelHeader.querySelector('ul');
+                if (epicTaskList == null) { log("Не нашли epicTaskList в документе")
+                } else {
+                    // создаем кнопку
+                    let epicTaskListElemSpan = document.createElement('span');
+                    epicTaskListElemSpan.id = gc.jira.elements.epicTaskListElemSpanId;
+                    epicTaskListElemSpan.classList.add('aui-icon', 'aui-icon-small', 'aui-iconfont-time');
+                    epicTaskListElemSpan.onclick = EpicTasksUpdateInfoSmart;
+
+                    // добавляем кнопку в список
+                    let epicTaskListElem = document.createElement('li');
+                    epicTaskListElem.append(epicTaskListElemSpan);// = '<span class="aui-icon aui-icon-small aui-iconfont-time"></span>';
+                    epicTaskList.append(epicTaskListElem);
+                }
+            }
+        }
+    }
+    function EpicTasksUpdateInfoSmart(){
+        let epicTaskListElemSpan = document.getElementById(gc.jira.elements.epicTaskListElemSpanId);
+        if (epicTaskListElemSpan) {
+            epicTaskListElemSpan.style.backgroundColor = "#ff7a83"
+        }
+        setTimeout(EpicTasksUpdateInfoSmartEnd, 0, gc.current_issue_data.key);
+    }
+    function EpicTasksUpdateInfoSmartEnd(epicKey){
+        const start= new Date().getTime();
+
+        let epicTable = document.getElementById("ghx-issues-in-epic-table");
+        if (epicTable == null) { log("Не нашли epicTable в документе")
+        } else {
+            if (epicTable.rows.length < 1) { log("В эпике нет задач")
+            } else {
+                //var epicTasks = [];
+                let estimateDevSummary = 0;
+                let estimateQASummary = 0;
+
+                // обходим таблицу задач и получаем трудозатраты по ролям
+                for(let i=0; i<epicTable.rows.length; i++) {
+                    if (epicTable.rows[i].id != gc.jira.elements.epicTableNewRowHeaderId && epicTable.rows[i].id != gc.jira.elements.epicTableNewRowBottomId) {
+                        let issueKey = epicTable.rows[i].getAttribute("data-issuekey");
+                        let epicTaskInfo = {
+                            issueKey:issueKey,
+                            elIssueId:'elIssueId'+issueKey.replace('-',''),
+                            roles :[{key:"Developers", estimate:0},{key:"QA", estimate:0}]
+                        }
+                        let objIssueTimetracking = JSON.parse(GetIssueTimetracking(issueKey));
+                        if (objIssueTimetracking) {
+                            //Smart_log(`${ln} objIssueTimetracking = ${JSON.stringify(objIssueTimetracking)}`);
+                            if ('estimates' in objIssueTimetracking) {
+                                if (objIssueTimetracking.estimates.length > 0) {
+                                    // обходим имеющиеся оценки
+                                    for(let r=0; r<objIssueTimetracking.estimates.length; r++) {
+                                        for(let ro=0; ro<epicTaskInfo.roles.length; ro++) {
+                                            //Smart_log(ln+` ${epicTaskInfo.issueKey} ${objIssueTimetracking.estimates[r].role} ${epicTaskInfo.roles[ro].key}`);
+                                            if (objIssueTimetracking.estimates[r].role == epicTaskInfo.roles[ro].key)
+                                            {
+                                                if ("remainingEstimateSeconds" in objIssueTimetracking.estimates[r]) { // originalEstimateSeconds
+                                                    let estimate = objIssueTimetracking.estimates[r].remainingEstimateSeconds/60/60;
+                                                    let templateValue = +estimate.toFixed(1);
+                                                    epicTaskInfo.roles[ro].estimate = templateValue;
+
+                                                    switch(epicTaskInfo.roles[ro].key) {
+                                                        case "Developers": {
+                                                            estimateDevSummary+=objIssueTimetracking.estimates[r].remainingEstimateSeconds;
+                                                            break;
+                                                        }
+                                                        case "QA": {
+                                                            estimateQASummary+=objIssueTimetracking.estimates[r].remainingEstimateSeconds;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else log(`отсутствуют данные objIssueTimetracking`);
+                            } else log(`отсутствуют данные estimates (issueKey=${objIssueTimetracking.key})`);
+                        } else log(`GetIssueTimetracking - данные не были получены (issueKey=${issueKey})`);
+                        //epicTasks.push(epicTaskInfo);
+                        let newCellDev = document.getElementById('newCellDev'+epicTaskInfo.elIssueId);
+                        if (newCellDev) {
+                            newCellDev.innerHTML = epicTaskInfo.roles[0].estimate;
+                        } else {
+                            newCellDev = epicTable.rows[i].insertCell(-1);
+                            newCellDev.className ='nav ghx-minimal';
+                            newCellDev.id='newCellDev'+epicTaskInfo.elIssueId;
+                            newCellDev.innerHTML = epicTaskInfo.roles[0].estimate;
+                        }
+
+                        let newCellQA = document.getElementById('newCellQA'+epicTaskInfo.elIssueId);
+                        if (newCellQA) {
+                            newCellQA.innerHTML = epicTaskInfo.roles[1].estimate;
+                        } else {
+                            newCellQA = epicTable.rows[i].insertCell(-1);
+                            newCellQA.className ='nav ghx-minimal';
+                            newCellQA.id='newCellQA'+epicTaskInfo.elIssueId;
+                            newCellQA.innerHTML = epicTaskInfo.roles[1].estimate;
+                        }
+                    }
+                }
+                // добавляем шапку
+                let elNewRowHeader = document.getElementById(gc.jira.elements.epicTableNewRowHeaderId);
+                if (!elNewRowHeader) {
+                    let newRowHeader = epicTable.insertRow(0);
+                    newRowHeader.id = gc.jira.elements.epicTableNewRowHeaderId;
+                    let newRowHeaderCell = newRowHeader.insertCell(0); newRowHeaderCell.innerHTML = 'V';
+                    newRowHeaderCell = newRowHeader.insertCell(1); newRowHeaderCell.innerHTML = 'Key';
+                    newRowHeaderCell = newRowHeader.insertCell(2); newRowHeaderCell.innerHTML = 'Summary';
+                    newRowHeaderCell = newRowHeader.insertCell(3); newRowHeaderCell.innerHTML = 'Type';
+                    newRowHeaderCell = newRowHeader.insertCell(4); newRowHeaderCell.innerHTML = 'State';
+                    newRowHeaderCell = newRowHeader.insertCell(5); newRowHeaderCell.innerHTML = 'Assignee';
+                    newRowHeaderCell = newRowHeader.insertCell(6); newRowHeaderCell.innerHTML = 'A';
+                    newRowHeaderCell = newRowHeader.insertCell(7); newRowHeaderCell.innerHTML = 'Dev';
+                    newRowHeaderCell = newRowHeader.insertCell(8); newRowHeaderCell.innerHTML = 'QA';
+                }
+
+                // добавляем футер
+                let elNewRowBottom = document.getElementById(gc.jira.elements.epicTableNewRowBottomId);
+                if (!elNewRowBottom) {
+                    let newRowBottom = epicTable.insertRow(-1);
+                    newRowBottom.id = gc.jira.elements.epicTableNewRowBottomId;
+                    let newRowBottomCell = newRowBottom.insertCell(0); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(1); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(2); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(3); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(4); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(5); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(6); newRowBottomCell.innerHTML = '';
+                    newRowBottomCell = newRowBottom.insertCell(7); newRowBottomCell.innerHTML = (estimateDevSummary/60/60).toFixed(1);
+                    newRowBottomCell = newRowBottom.insertCell(8); newRowBottomCell.innerHTML = (estimateQASummary/60/60).toFixed(1);
+                } else {
+                    elNewRowBottom.cells[7].innerHTML = (estimateDevSummary/60/60).toFixed(1);
+                    elNewRowBottom.cells[8].innerHTML = (estimateQASummary/60/60).toFixed(1);
+                }
+            }
+        }
+
+        let epicTaskListElemSpan = document.getElementById(gc.jira.elements.epicTaskListElemSpanId);
+        if (epicTaskListElemSpan) {
+            epicTaskListElemSpan.style.backgroundColor = "white"
+        }
+
+        const end = new Date().getTime();
+        log(`Время работы: ${end - start} мс`);
     }
 })();
 //</script>
