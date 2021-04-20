@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.7'
+    const script_version = '1.8'
     const environment = "TEST"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -138,9 +138,13 @@
             "refreshStopped":true, // определяет возможность обновления статусов
             "countUpdate":0 // вычисляет кол-во обновлений статусов на доске бэклога
         }
-        //
+        // настройки процесса загрузки спринта
         gc.process["sprintResourceCalc"] = {
             "toolsTableButtonStartCalculationId":'toolsTableButtonStartCalculation'+environment
+        }
+        // настройки процесса заливки фона задач
+        gc.process["fillBackgroundIssies"] = {
+            "canFill":false
         }
         // подписываемся на события
         document.addEventListener("DOMContentLoaded", DOMContentLoaded());
@@ -343,7 +347,9 @@
     }
     // запуск обработчиков при ajax-изменения на странице
     function FajaxComplete(){
-        fillKanbanCard();
+        if (gc.process.fillBackgroundIssies.canFill){
+            fillKanbanCard();
+        }
         // проверяем подписки на события
         AddEventToButton();
         // обновление статусов задач в списке бэклога
@@ -375,7 +381,6 @@
 
                             if ('rapidView' in teamData && teamData.rapidView != null && gc.urlParams.has("rapidView") && teamData.rapidView == gc.urlParams.get("rapidView")) {
                                 objTeamPermissions.push(teamData);
-                                log("+1");
                             }
                         }
                         // если разрешения были получены - запускаем обработчики правил
@@ -401,6 +406,9 @@
                     switch(process.key) {
                         case "ViewEstimationsOnPlaning": {
                             setTimeout(ApplyRuleViewEstimationsOnPlaning, tDelay, objPermission);
+                            break; }
+                        case "FillBackgroundIssies": {
+                            gc.process.fillBackgroundIssies.canFill = true;
                             break; }
                     }
                 }
@@ -976,16 +984,29 @@
         // https://jira.action-media.ru/secure/RapidBoard.jspa?rapidView=746&view=detail&selectedIssue=SS-11463
         if (!gc.urlParams.has("rapidView")) {
             return;
-        } else {
+        } /*else {
             // проверяем, что мы на нужной доске
             if ( gc.urlParams.get("rapidView") !== "136") return; // 746
-        }
+        }*/
 
-        // ищем карты по доске
+        // ищем карты по agile доске
         let $cards = $(".js-detailview");
         //log(`cards.length ${$cards.length} `);
         if ($cards.length > 0) {
             $cards.each(function(indx){
+                // ищем элемент ghx-grabber
+                let cardGrabberColor = $(this).children(".ghx-grabber").css('background-color');
+                if ( cardGrabberColor !== 'rgb(238, 238, 238)' ) {
+                    $(this).css('background-color',cardGrabberColor)
+                };
+            })
+        }
+
+        // ищем карты по backlog доске
+        let $listTasks = $(".js-issue");
+        //log(`cards.length ${$cards.length} `);
+        if ($listTasks.length > 0) {
+            $listTasks.each(function(indx){
                 // ищем элемент ghx-grabber
                 let cardGrabberColor = $(this).children(".ghx-grabber").css('background-color');
                 if ( cardGrabberColor !== 'rgb(238, 238, 238)' ) {
