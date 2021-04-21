@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.8'
+    const script_version = '1.11'
     const environment = "TEST"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -146,14 +146,44 @@
         gc.process["fillBackgroundIssies"] = {
             "canFill":false
         }
+        // настройки для процесса отображения статусов задач на доске бэклога для первого активного спринта
+        gc.process["showStatesOnBacklogBoard"] = {
+            "canShow":false,
+            "issues":[]
+        }
         // подписываемся на события
-        document.addEventListener("DOMContentLoaded", DOMContentLoaded());
+        //document.addEventListener("DOMContentLoaded", DOMContentLoaded());
+
+        getPermissions();
+        // получаем метаданные из Jira
+        gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();//AJS.Meta.get("issue-key");
+        log(`current_issue_data = ${gc.current_issue_data.key}`)
+        gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
+        // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
+        if (environment == "TEST") createDebugMenu();
+
+        // добавляем кнопку на эпик для получения оценки по задачам
+        setTimeout(EpicTasksAddListButtonCalc, 500); log(`Запуск setTimeout(EpicTasksAddListButtonCalc)`);
+        // скрываем расширения для задачи списка задач бэклога
+        if (gc.urlParams.has("rapidView")) {
+            switch(gc.urlParams.get("rapidView")) {
+                case "136": {
+                    gc.process.showStatesInBacklog.canShow = true;
+                    gc.process.showStatesInBacklog.refreshStopped = false;
+                    HideExtendedBacklogTasksPanel();
+                    break;
+                }
+            }
+        }
 
         $(document).ajaxComplete(FajaxComplete);
         log(`Скрипт успешно подключен. Версия ${script_version}`);
     }
     function DOMContentLoaded(){
-        getPermissions();
+        // запускаем базовые установки
+        let deferredSetup = defer(setup, 1000);
+        deferredSetup();
+        /*getPermissions();
         // получаем метаданные из Jira
         gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();//AJS.Meta.get("issue-key");
         log(`current_issue_data = ${gc.current_issue_data.key}`)
@@ -173,7 +203,7 @@
                     break;
                 }
             }
-        }
+        }*/
     }
 
     // построение меню отладки для разработки
@@ -332,8 +362,11 @@
     }
 
     // запускаем базовые установки
-    let deferredSetup = defer(setup, 3000);
-    deferredSetup();
+    //let deferredSetup = defer(setup, 2000);
+    //deferredSetup();
+
+    // подписываемся на события
+    document.addEventListener("DOMContentLoaded", DOMContentLoaded());
 
     // отобразить пользователю флаг
     function showFlag(message, title, type = "info", typeClose = "manual"){
@@ -405,17 +438,23 @@
                     //Smart_log(`${ln} process.key= ${process.key}`);
                     switch(process.key) {
                         case "ViewEstimationsOnPlaning": {
-                            setTimeout(ApplyRuleViewEstimationsOnPlaning, tDelay, objPermission);
+                            setTimeout(ApplyRule_ViewEstimationsOnPlaning, tDelay, objPermission);
+                            log(`Процесс разрешен: ${process.key}`);
                             break; }
                         case "FillBackgroundIssies": {
                             gc.process.fillBackgroundIssies.canFill = true;
+                            log(`Процесс разрешен: ${process.key}`);
+                            break; }
+                        case "ShowStatesOnBacklogBoard": {
+                            setTimeout(ApplyRule_ShowStatesOnBacklogBoard, tDelay, objPermission);
+                            log(`Процесс разрешен: ${process.key}`);
                             break; }
                     }
                 }
             } else log(`Данные по доступным процессам не получены. Проверьте в конфиге секцию process`);
         }
     }
-    function ApplyRuleViewEstimationsOnPlaning(objPermission){
+    function ApplyRule_ViewEstimationsOnPlaning(objPermission){
         // добавляем на панель кнопку запуска расчета
         let toolsTable = document.getElementById("ghx-modes-tools");
         if (toolsTable !== null) {
@@ -434,6 +473,32 @@
                 // проверяем, что будущий спринт существует. Если его нет, то дизейблим кнопку
                 //if (GetFutureSprintId() == -1 ) toolsTableButtonStartCalculation.disabled = true;
                 toolsTable.appendChild(toolsTableButtonStartCalculation);
+            }
+        }
+    }
+    function ApplyRule_ShowStatesOnBacklogBoard(objPermission){
+        // получаем первый активный спринт
+        let sprintId = GetFirstCurrentActiveSprintId();
+        // запрашиваем статусы всех задач в нем
+        if (sprintId > 0) {
+            let jqlQuery = `Sprint =${sprintId}  `;
+            let requestParams = [{key:'maxResults',value:'150'},{key:'jql',value:jqlQuery},{key:'fields',value:'key,id,status'}];
+            // получаем результаты запроса - массив задач
+            //let objIssues = JSON.parse(GetIssuesByQueryAjax(jqlQuery,requestParams));
+            let objIssues = GetIssuesByQueryAjax(jqlQuery,requestParams);
+            //log(`${JSON.stringify(objIssues)}`);
+            if (objIssues) {
+                if ('total' in objIssues && objIssues.total > 0) {
+                    let sprintTasks = [];
+                    // обходим полученные задачи
+                    for (let objIssue of objIssues.issues) {
+                        // результаты кладем в массив процесса
+                        gc.process.showStatesOnBacklogBoard.issues.push({"id":objIssue.id,"key":objIssue.key,"statusName":objIssue.fields.status.name});
+                    }
+                    // разрешаем отображение статусов по данным массива
+                    gc.process.showStatesOnBacklogBoard.canShow = true;
+                }
+                log(gc.process.showStatesOnBacklogBoard.issues);
             }
         }
     }
@@ -596,6 +661,37 @@
             )
         })
     }
+    // запрашиваем список задач на основании фильтра синхронно
+    function GetIssuesByQueryAjax(jqlQuery, searchParams){
+        let result = '';
+        // считываем данные инициативы для дальнейшего использования
+        let url = new URL(gc.jira.urls.searchIssue);
+        if (searchParams) {
+            for (let x of searchParams) {
+                url.searchParams.set(x.key, x.value);
+            }
+        }
+        //url.searchParams.set('fields', 'summary,components,customfield_11601,customfield_11610,customfield_11504');
+        $.ajax({
+            url: url, // указываем URL
+            type: "GET", // HTTP метод, по умолчанию GET
+            data: {}, // данные, которые отправляем на сервер CustomSource=AnnouncementBanner ABDetail=AB_SmartDlgShow
+            dataType: "json", // тип данных загружаемых с сервера
+            async: false,
+            success: function (data) {
+                //log(`data ${JSON.stringify(data)}`);
+                //SmartDlgGetIniciativeDataFromObj(data);
+                result = data;
+            },
+            error: function(){
+                showFlag(`Не удалось получить данные по запросу <strong>${jqlQuery}</strong>. Попробуйте перезагрузить страницу.`,"Внимание!","error");
+                log(`Ошибка выполнения GET запроса ${jqlQuery}`);
+                log(`url: ${url}`);
+                return result;
+            }
+        });
+        return result;
+    }
     // непоянтно - общая задача или нет
     // ToDo: Выпилить!
     function GetIssueTimetracking(issueKey){
@@ -651,7 +747,7 @@
     }
 
     function testAlert(){
-        alert("Test");
+        alert("0");
         /*let prDevTaskTime = setTimeTracking("SS-13484", "10206", "5m","test");
         prDevTaskTime.then(
             result => {
@@ -673,6 +769,15 @@
         if (elFutureSprints !== null && elFutureSprints.length>0) {
             result = elFutureSprints[0];
         } else log("Будущий спринт не найден");
+        return result;
+    }
+    // получаем текущий активный спринт I
+    function GetFirstCurrentActiveSprintId(){
+        let result = 0;
+        let $elCurrentSprints = $(".ghx-backlog-container.ghx-sprint-active.js-sprint-container.ghx-open").first();
+        if ($elCurrentSprints.length>0) {
+            result = $elCurrentSprints.attr("data-sprint-id");
+        } else log("Первый активный спринт не найден");
         return result;
     }
     // получаем будущий спринт II
@@ -1003,14 +1108,17 @@
         }
 
         // ищем карты по backlog доске
-        let $listTasks = $(".js-issue");
+        // берем только активный спринт
+        let $activeSprintContainer = $(".ghx-backlog-container.ghx-sprint-active.js-sprint-container.ghx-open");
+        let $listTasks = $activeSprintContainer.find(".js-issue"); // ghx-row js-issue ghx-end
         //log(`cards.length ${$cards.length} `);
         if ($listTasks.length > 0) {
             $listTasks.each(function(indx){
                 // ищем элемент ghx-grabber
                 let cardGrabberColor = $(this).children(".ghx-grabber").css('background-color');
                 if ( cardGrabberColor !== 'rgb(238, 238, 238)' ) {
-                    $(this).css('background-color',cardGrabberColor)
+                    $(this).css('background-color',cardGrabberColor);
+                    $(this).find(".ghx-end").css('background-color',cardGrabberColor);
                 };
             })
         }
