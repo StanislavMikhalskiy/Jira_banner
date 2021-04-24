@@ -2,8 +2,8 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.11'
-    const environment = "TEST"; // DEV TEST PROD
+    const script_version = '1.13'
+    const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -143,7 +143,7 @@
             "toolsTableButtonStartCalculationId":'toolsTableButtonStartCalculation'+environment
         }
         // настройки процесса заливки фона задач
-        gc.process["fillBackgroundIssies"] = {
+        gc.process["fillBackgroundIssues"] = {
             "canFill":false
         }
         // настройки для процесса отображения статусов задач на доске бэклога для первого активного спринта
@@ -165,7 +165,7 @@
         // добавляем кнопку на эпик для получения оценки по задачам
         setTimeout(EpicTasksAddListButtonCalc, 500); log(`Запуск setTimeout(EpicTasksAddListButtonCalc)`);
         // скрываем расширения для задачи списка задач бэклога
-        if (gc.urlParams.has("rapidView")) {
+        /*if (gc.urlParams.has("rapidView")) {
             switch(gc.urlParams.get("rapidView")) {
                 case "136": {
                     gc.process.showStatesInBacklog.canShow = true;
@@ -174,14 +174,14 @@
                     break;
                 }
             }
-        }
+        }*/
 
         $(document).ajaxComplete(FajaxComplete);
         log(`Скрипт успешно подключен. Версия ${script_version}`);
     }
     function DOMContentLoaded(){
         // запускаем базовые установки
-        let deferredSetup = defer(setup, 1000);
+        let deferredSetup = defer(setup, 7000);
         deferredSetup();
         /*getPermissions();
         // получаем метаданные из Jira
@@ -380,17 +380,23 @@
     }
     // запуск обработчиков при ajax-изменения на странице
     function FajaxComplete(){
-        if (gc.process.fillBackgroundIssies.canFill){
-            fillKanbanCard();
+        if (gc.process.fillBackgroundIssues.canFill){
+            setTimeout(fillKanbanCard, 10);
         }
         // проверяем подписки на события
-        AddEventToButton();
+        setTimeout(AddEventToButton, 10);
         // обновление статусов задач в списке бэклога
-        if (gc.process.showStatesInBacklog.canShow) {
+        /*if (gc.process.showStatesInBacklog.canShow) {
             if (!gc.process.showStatesInBacklog.refreshStopped) {
                 setTimeout(GetIssueStates, 200);
                 gc.process.showStatesInBacklog.refreshStopped = true;
             }
+        }*/
+        // отображение статусов задач на доске бэклога для первого активного спринта
+        //log("FajaxComplete");
+        if (gc.process.showStatesOnBacklogBoard.canShow) {
+            setTimeout(showStatesOnBacklogBoard, 10);
+            //log("showStatesOnBacklogBoard");
         }
     }
     // получить разрешения для команд
@@ -441,8 +447,8 @@
                             setTimeout(ApplyRule_ViewEstimationsOnPlaning, tDelay, objPermission);
                             log(`Процесс разрешен: ${process.key}`);
                             break; }
-                        case "FillBackgroundIssies": {
-                            gc.process.fillBackgroundIssies.canFill = true;
+                        case "FillBackgroundIssues": {
+                            gc.process.fillBackgroundIssues.canFill = true;
                             log(`Процесс разрешен: ${process.key}`);
                             break; }
                         case "ShowStatesOnBacklogBoard": {
@@ -477,12 +483,13 @@
         }
     }
     function ApplyRule_ShowStatesOnBacklogBoard(objPermission){
+        log('Считываем задачи спринта');
         // получаем первый активный спринт
         let sprintId = GetFirstCurrentActiveSprintId();
         // запрашиваем статусы всех задач в нем
         if (sprintId > 0) {
             let jqlQuery = `Sprint =${sprintId}  `;
-            let requestParams = [{key:'maxResults',value:'150'},{key:'jql',value:jqlQuery},{key:'fields',value:'key,id,status'}];
+            let requestParams = [{key:'maxResults',value:'2000'},{key:'jql',value:jqlQuery},{key:'fields',value:'key,id,status'}];
             // получаем результаты запроса - массив задач
             //let objIssues = JSON.parse(GetIssuesByQueryAjax(jqlQuery,requestParams));
             let objIssues = GetIssuesByQueryAjax(jqlQuery,requestParams);
@@ -497,10 +504,10 @@
                     }
                     // разрешаем отображение статусов по данным массива
                     gc.process.showStatesOnBacklogBoard.canShow = true;
-                }
-                log(gc.process.showStatesOnBacklogBoard.issues);
-            }
-        }
+                    log(`Считано ${objIssues.total} задач`);
+                } else log('Считано 0 задач');
+            } else log('Ошибка получения объекта с задачами');
+        } else log('Не найден активный спринт');
     }
     // возвращает объект запрошенной задачи
     function getIssue(issueCode,fields){
@@ -1122,6 +1129,53 @@
                 };
             })
         }
+    }
+    // отображение статусов задач на доске бэклога для первого активного спринта
+    function showStatesOnBacklogBoard(){
+        // отключаем обновление
+        gc.process.showStatesOnBacklogBoard.canShow = false;
+        // находим первый активный спринт
+        let $elCurrentSprints = $(".ghx-backlog-container.ghx-sprint-active.js-sprint-container.ghx-open").first();
+        if ($elCurrentSprints.length>0) {
+            // обходим все элементы задач в списке
+            let $elTasks = $elCurrentSprints.find(".js-issue");
+            $elTasks.each(function(indx){
+                let taskKey = $(this).attr("data-issue-key");
+                // ищем наш элемент, если наши, то ничего не делаем
+                // если не нашли, то ищем его статус и добавляем к задаче
+                let $customEl = $(this).find(`.${gc.jira.elements.stateCustomClass}`)
+                if ($customEl.length < 1) {
+                    // ищем статус задачи
+                    let dataTask = gc.process.showStatesOnBacklogBoard.issues.find(x => x.key == taskKey);
+                    if (dataTask) {
+                        let $stateSpan = $('<span/>', {
+                            //id: 'foo',
+                            //href: 'http://google.com',
+                            //title: 'Become a Googler',
+                            //rel: 'external',
+                            text: dataTask.statusName,
+                            'class': "aui-label ghx-label ghx-label-double ghx-label-4 "+gc.jira.elements.stateCustomClass
+                        })
+                            .css({
+                                'margin-right':'5px',
+                                'margin-left':'5px',
+                                'display':"inline"
+                            })
+                        let $span = $(this).find('span.ghx-end.ghx-estimate');//.find(`.ghx-end.ghx-extra-field-estimate`).insertAfter($stateSpan); ghx-end ghx-extra-field-estimate
+                        if ($span.length > 0 ) {
+                            $span.after($stateSpan)
+                        } else {
+                            $span = $(this).find('span.ghx-end.ghx-extra-field-estimate').find('.ghx-statistic-badge');
+                            if ($span.length > 0 ) {
+                                $span.after($stateSpan)
+                            }
+                        }
+                    }
+                }
+            });
+        } else log("Не найден первый активный спринт");
+        // включаем обновление
+        gc.process.showStatesOnBacklogBoard.canShow = true;
     }
     //
     function GetIssueStates (){
