@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14'
+    const script_version = '1.14.1'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -146,9 +146,7 @@
             "issues":[]
         }
 
-        // получаем метаданные из Jira
-        gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();
-        gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
+
         // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
         if (environment == "DEV") createDebugMenu();
 
@@ -158,6 +156,10 @@
     }
     // установки, которын можно загружать после полной загрузки страницы
     function setupLazyLoad(){
+        // получаем метаданные из Jira
+        gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();
+        gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
+        log(`gc.current_issue_data.key = ${gc.current_issue_data.key}`);
         // добавляем кнопку на эпик для получения оценки по задачам
         setTimeout(EpicTasksAddListButtonCalc, 500); log(`Запуск setTimeout(EpicTasksAddListButtonCalc)`);
         log(`Скрипт успешно подключен. Версия ${script_version}`);
@@ -293,6 +295,16 @@
         $element.text("Расчет спринта");
         $menu.append($element);
 
+        // запустить SMART диалог
+        $element = $('<a>').attr({
+            class: "drophref",
+            href : "#"
+        })
+            .click(function() {
+                SmartDlgShow();
+            });
+        $element.text("Запустить SMART диалог");
+        $menu.append($element);
 
     }
     // добавляем обработчики кнопкам, которые добавлены через ScriptRunner
