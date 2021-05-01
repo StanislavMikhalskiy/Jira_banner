@@ -2,11 +2,17 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.1'
+    const script_version = '1.14.2'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
+
+    //log('начальный readyState:' + document.readyState);
+    //document.addEventListener('readystatechange', () => log('readyState:' + document.readyState));
+    //document.addEventListener('DOMContentLoaded', () => log('DOMContentLoaded'));
+
+    window.onload = () => setTimeout(setup,500);
 
     function log(value){
         let dt = new Date();
@@ -146,29 +152,32 @@
             "issues":[]
         }
 
+        // получаем метаданные из Jira
+        gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();
+        gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
+        log(`gc.current_issue_data.key = ${gc.current_issue_data.key}`);
+
+        $(document).ajaxComplete(FajaxComplete);
+        if (gc.urlParams.has("rapidView")) {
+            //log('Мы на доске, требуется получение разрешений');
+            getPermissions();
+        } //else log('Мы не на доске, получение разрешений не требуется');
+
+
 
         // если это среда разработки, то добавляем боковое меню для запуска фич для отладки
         if (environment == "DEV") createDebugMenu();
 
-        let deferredSetup = defer(setupLazyLoad, 3000);
+        let deferredSetup = defer(setupLazyLoad, 2000);
         deferredSetup();
 
     }
     // установки, которын можно загружать после полной загрузки страницы
     function setupLazyLoad(){
-        // получаем метаданные из Jira
-        gc.current_issue_data["key"] = JIRA.Issue.getIssueKey();
-        gc.current_issue_data["projectKey"] = JIRA.API.Projects.getCurrentProjectKey();
-        log(`gc.current_issue_data.key = ${gc.current_issue_data.key}`);
+
         // добавляем кнопку на эпик для получения оценки по задачам
         setTimeout(EpicTasksAddListButtonCalc, 500); log(`Запуск setTimeout(EpicTasksAddListButtonCalc)`);
         log(`Скрипт успешно подключен. Версия ${script_version}`);
-    }
-    function DOMContentLoaded(){
-        // запускаем базовые установки
-        setup();
-        $(document).ajaxComplete(FajaxComplete);
-        getPermissions();
     }
 
     // построение меню отладки для разработки
@@ -348,12 +357,8 @@
         }
     }
 
-    // запускаем базовые установки
-    //let deferredSetup = defer(setup, 2000);
-    //deferredSetup();
-
     // подписываемся на события
-    document.addEventListener("DOMContentLoaded", DOMContentLoaded());
+    //document.addEventListener("DOMContentLoaded", DOMContentLoaded);
 
     // отобразить пользователю флаг
     function showFlag(message, title, type = "info", typeClose = "manual"){
