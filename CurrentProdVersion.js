@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.2'
+    const script_version = '1.14.3'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -477,7 +477,7 @@
                 //if (GetFutureSprintId() == -1 ) toolsTableButtonStartCalculation.disabled = true;
                 toolsTable.appendChild(toolsTableButtonStartCalculation);
 
-                // заносим данные для debug-меню
+                // заносим данные для debug-меню и теперь для процесса
                 gc.process["ViewEstimationsOnPlaning_objPermission"] = objPermission;
             }
         }
@@ -812,8 +812,23 @@
                 let templateValue = estimate.toFixed(1);
                 let color = "black";
                 let bgColor = "";
+                let maxCapacity = 30;
                 // если превышено доступное время
-                if (estimate > 25) color = "red";
+                // обходим массив процессов
+                for (let process of gc.process.ViewEstimationsOnPlaning_objPermission.processes) {
+                    //Smart_log(`${ln} process.key= ${process.key}`);
+                    switch(process.key) {
+                        case "ViewEstimationsOnPlaning": {
+                            if (process.capacity) {
+                                maxCapacity = process.capacity;
+                            }
+                            break; }
+                    }
+                }
+                // if ('team' in objPermission && objPermission.team != null && objPermission.team.length > 0) {
+                // let channel_url = credentials.zoom[room] && credentials.zoom[room].url;
+
+                if (estimate > maxCapacity) color = "red";
                 // если есть задачи без оценки
                 if (developerEstimate.hasTaskWithoutEstimate) bgColor = "yellow";
 
