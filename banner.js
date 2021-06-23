@@ -2,8 +2,8 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.3'
-    const environment = "PROD"; // DEV TEST PROD
+    const script_version = '1.14.4'
+    const environment = "DEV"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -44,7 +44,7 @@
         // заполняем конфиг
         gc['jira'] = {mainUrl:url}
         gc.jira['urls'] = {
-            "viewIssue":gc.jira.mainUrl+"/browse/",
+            "viewIssue":gc.jira.mainUrl+"/browse/", // gc.jira.urls.viewIssue
             "getIssue":gc.jira.mainUrl+"/rest/api/2/issue/", // gc.jira.urls.getIssue
             "postIssue":gc.jira.mainUrl+"/rest/api/2/issue/", // gc.jira.urls.postIssue
             "searchIssue":gc.jira.mainUrl+"/rest/api/2/search", // gc.jira.urls.searchIssue
@@ -140,7 +140,8 @@
 
         // настройки процесса загрузки спринта
         gc.process["sprintResourceCalc"] = {
-            "toolsTableButtonStartCalculationId":'toolsTableButtonStartCalculation'+environment
+            "toolsTableButtonStartCalculationId":'toolsTableButtonStartCalculation'+environment,
+            "started":false
         }
         // настройки процесса заливки фона задач
         gc.process["fillBackgroundIssues"] = {
@@ -448,12 +449,8 @@
     }
     function ApplyRule_ViewEstimationsOnPlaning(objPermission){
         // добавляем на панель кнопку запуска расчета
-        let toolsTable = document.getElementById("ghx-modes-tools");
+        let toolsTable = $('#ghx-modes-tools'); //document.getElementById("ghx-modes-tools");
         if (toolsTable !== null) {
-            let toolsTableButtonStartCalculation = document.getElementById(gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId);
-            if (toolsTableButtonStartCalculation === null) {
-                toolsTableButtonStartCalculation = document.createElement('button');
-                toolsTableButtonStartCalculation.id = gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId;
                 let btnCaption = "Расчет"
                 switch (environment) {
                     case "DEV": {
@@ -465,21 +462,31 @@
                         break
                     }
                 }
-                toolsTableButtonStartCalculation.innerHTML = btnCaption;
-                toolsTableButtonStartCalculation.onclick = function() { CalcWorkloadFutureSprint(objPermission); }
-                toolsTableButtonStartCalculation.className="aui-button";
-                //toolsTableButtonStartCalculation.style.display = "inline";
-                //toolsTableButtonStartCalculation.style.border = "1px solid black";
-                toolsTableButtonStartCalculation.style.marginLeft = "5px"
-                //toolsTableButtonStartCalculation.style.padding = "5px"
-                //toolsTableButtonStartCalculation.style.color = "black"
-                // проверяем, что будущий спринт существует. Если его нет, то дизейблим кнопку
-                //if (GetFutureSprintId() == -1 ) toolsTableButtonStartCalculation.disabled = true;
-                toolsTable.appendChild(toolsTableButtonStartCalculation);
-
-                // заносим данные для debug-меню и теперь для процесса
-                gc.process["ViewEstimationsOnPlaning_objPermission"] = objPermission;
+                let toolsTableButtonStartCalculation_html = `
+<div class="aui-buttons" style="margin-left: 5px">
+    <button class="aui-button aui-button-split-main" id="${gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId}">${btnCaption}</button>
+    <button class="aui-button aui-dropdown2-trigger aui-button-split-more" aria-controls="split-container-dropdown-sprintResourceCalc">Split more</button>
+</div>
+<aui-dropdown-menu id="split-container-dropdown-sprintResourceCalc">
+    <aui-item-link id="item-sprintResourceCalc-showTaskWithoutEstimate">Задачи без оценки</aui-item-link>
+</aui-dropdown-menu>`
+            toolsTable.append(toolsTableButtonStartCalculation_html);
+            // добавляем запуск основного расчета
+            let toolsTableButtonStartCalculation = $(`#${gc.process.sprintResourceCalc.toolsTableButtonStartCalculationId}`);
+            if (toolsTableButtonStartCalculation) {
+                toolsTableButtonStartCalculation.click(function(){
+                    CalcWorkloadFutureSprint(objPermission);
+                });
             }
+            // добавляем запуск к элементу выпадающего меню
+            let toolsTableButtonStartCalculation_item = $(`#item-sprintResourceCalc-showTaskWithoutEstimate`);
+            if (toolsTableButtonStartCalculation_item) {
+                toolsTableButtonStartCalculation_item.click(function(){
+                    CalcWorkloadFutureSprintReportIssuesWithoutEstimate();
+                });
+            }
+            // заносим данные для debug-меню и теперь для процесса
+            gc.process["ViewEstimationsOnPlaning_objPermission"] = objPermission;
         }
     }
     // возвращает объект запрошенной задачи
@@ -861,6 +868,7 @@
             elCustomEstimation.style.backgroundColor = bgColor;
         } else {
             log(`Элемент [data-filter-id="${elParentAttr}"] не найден`);
+            gc.process.sprintResourceCalc.report.message+=`<br>Элемент [data-filter-id="${elParentAttr}"] не найден`
         }
     }
     function UpdateEstimateInfoByRole(rolesEstimates) {
@@ -892,25 +900,35 @@
         if (futureSprintId > -1) {
 
             let jqlQuery = `Sprint =${futureSprintId} and status != Closed `;
-            let requestParams = [{key:'maxResults',value:'150'},{key:'jql',value:jqlQuery},{key:'fields',value:'assignee,customfield_11304'},{key:'Detail',value:'CalcWorkloadfutureSprint'}];
+            let requestParams = [{key:'maxResults',value:'150'},{key:'jql',value:jqlQuery},{key:'fields',value:'assignee,customfield_11304,summary'},{key:'Detail',value:'CalcWorkloadfutureSprint'}];
             // получаем результаты запроса - массив задач
             let objIssues = JSON.parse(GetIssuesByQuery(jqlQuery,requestParams));
-            //Smart_log(`${ln} objIssues = ${JSON.stringify(objIssues)}`);
+            //log(`objIssues = ${JSON.stringify(objIssues)}`);
 
             if (objIssues) {
                 if ('total' in objIssues && objIssues.total > 0) {
                     let futureSprintTasks = [];
+                    gc.process.sprintResourceCalc.started = true;
+                    gc.process.sprintResourceCalc["report"] = {"issuesWithoutAssignee":[], "issuesWithoutEstimate": {}, "message":""}
                     // обходим полученные задачи
                     for (let objIssue of objIssues.issues) {
+                        let summary = ""
+                        if ( 'summary' in objIssue.fields && objIssue.fields.summary !== null) {
+                            summary = objIssue.fields.summary;
+                        }
                         let assignee = "";
                         if ( 'assignee' in objIssue.fields && objIssue.fields.assignee !== null && 'key' in objIssue.fields.assignee ) {
                             assignee=objIssue.fields.assignee.key
                         } else {
-                            log(`У задачи ${objIssue.key} не указан assignee`);
+                            //log(`У задачи ${objIssue.key} не указан assignee`);
+                            // добавляем информацию о задачах без ответственного для вывода в отчет
+                            gc.process.sprintResourceCalc.report.issuesWithoutAssignee.push({"issueKey":objIssue.key, "summary":summary});
                         };
+
                         let sprintTaskInfo = {
                             issueKey:objIssue.key,
                             assignee:assignee,
+                            summary:summary,
                             roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
                         }
                         // обрабатывам роли из задачи
@@ -971,8 +989,14 @@
                                                 }
                                             }
                                         }
-                                    } else log(`отсутствуют данные objIssueTimetracking`);
-                                } else log(`отсутствуют данные estimates (issueKey=${objIssueTimetracking.key})`);
+                                    } else {
+                                        log(`отсутствуют данные objIssueTimetracking для ${futureSprintTask.issueKey}`);
+                                        gc.process.sprintResourceCalc.report.message+=`<br>Отсутствуют данные objIssueTimetracking для ${futureSprintTask.issueKey} ${futureSprintTask.summary}`
+                                    }
+                                } else {
+                                    log(`отсутствуют данные estimates (issueKey=${objIssueTimetracking.key})`);
+                                    gc.process.sprintResourceCalc.report.message+=`<br>Отсутствуют данные estimates (${objIssueTimetracking.key} ${futureSprintTask.summary})`
+                                }
                             } else log(`GetIssueTimetracking - данные не были получены (issueKey=${futureSprintTask.issueKey})`);
                         }
                         // вывод данных в лог для отладки
@@ -1009,7 +1033,14 @@
                                                 }
                                                 else {
                                                     developerInfo.hasTaskWithoutEstimate = true;
-                                                    log(`task.key = ${task.issueKey}, task.remainingEstimate = ${taskRole.estimate}, task.assignee = ${task.assignee}`);
+                                                    //log(`task.key = ${task.issueKey}, task.remainingEstimate = ${taskRole.estimate}, task.assignee = ${task.assignee}`);
+                                                    // добавляем информацию о задачах без оценки для вывода в отчет
+                                                    // проверяем, был ли данный разработчик уже добавлен
+                                                    //log(JSON.stringify(gc.process.sprintResourceCalc.report.issuesWithoutEstimate));
+                                                    if (!(task.assignee in gc.process.sprintResourceCalc.report.issuesWithoutEstimate)) {
+                                                        gc.process.sprintResourceCalc.report.issuesWithoutEstimate[task.assignee] = {"issues":[]};
+                                                    }
+                                                    gc.process.sprintResourceCalc.report.issuesWithoutEstimate[task.assignee].issues.push({"issueKey":task.issueKey, "summary":task.summary});
                                                 }
                                             }
                                         }
@@ -1067,6 +1098,69 @@
             }
 
         } else log(`Не найден futureSprintId`);
+    }
+    function CalcWorkloadFutureSprintReportIssuesWithoutEstimate(){
+        if (gc.process.sprintResourceCalc.started) {
+            //alert("Функционал находится в разработке.");
+            // ищем наш диалог, еслинет - добавляем
+            if ( !($('*').is("#calcWorkloadFutureSprintReport-dialog")) ) {
+                let dialog = `
+<section id="calcWorkloadFutureSprintReport-dialog" class="aui-dialog2 aui-dialog2-xlarge aui-layer calcWorkloadFutureSprintReport-dialog" role="dialog" aria-hidden="true">
+<header class="aui-dialog2-header">
+Отчет по последнему расчету
+</header>
+<div id="calcWorkloadFutureSprintReport-content" class="aui-dialog2-content">
+</div>
+<footer class="aui-dialog2-footer">
+    <div class="aui-dialog2-footer-actions">
+        <button id="calcWorkloadFutureSprintReport-submit-button" class="aui-button aui-button-primary">Ok</button>
+    </div>
+</footer>
+</section>
+
+<style>
+.calcWorkloadFutureSprintReport-dialog {
+   width: 900px;
+}
+</style>
+`;
+                $("body").append(dialog);
+                $("#calcWorkloadFutureSprintReport-submit-button").on('click', function (e) {
+                    e.preventDefault();
+                    AJS.dialog2("#calcWorkloadFutureSprintReport-dialog").hide();
+                });
+            }
+            // удаляем контент, если он был
+            $('#calcWorkloadFutureSprintReport-content').empty();
+            let content = `<dl>`
+            // проверяем неназначенные задачи
+            if (gc.process.sprintResourceCalc.report.issuesWithoutAssignee.length > 0) {
+                content+='<dt>Неназначенные задачи</dt>'
+                for (let x of gc.process.sprintResourceCalc.report.issuesWithoutAssignee) {
+                    content+=`<dd><a href="${gc.jira.urls.viewIssue}${x.issueKey}">${x.issueKey} ${x.summary}</a></dd>`
+                }
+            }
+            // gc.process.sprintResourceCalc.report.issuesWithoutEstimate[task.assignee] = {"issues":[]};
+            // gc.process.sprintResourceCalc.report.issuesWithoutEstimate[task.assignee].issues.push({"issueKey":task.issueKey});
+            if (Object.keys(gc.process.sprintResourceCalc.report.issuesWithoutEstimate).length > 0) {
+                content+='<dt>Задачи без оценки ( remainingEstimate=0 )</dt>'
+            }
+            for (let assignee in gc.process.sprintResourceCalc.report.issuesWithoutEstimate) {
+                content+=`<dt>${assignee}</dt>`
+                for (let task of gc.process.sprintResourceCalc.report.issuesWithoutEstimate[`${assignee}`].issues) {
+                    content+=`<dd><a href="${gc.jira.urls.viewIssue}${task.issueKey}">${task.issueKey} ${task.summary}</a></dd>`
+                }
+            }
+            if (gc.process.sprintResourceCalc.report.message.length>0) {
+                content+=`<dt>Прочее</dt>`
+                content+=`<dd>${gc.process.sprintResourceCalc.report.message}</dd>`
+            }
+            content+='</dl>'
+            $('#calcWorkloadFutureSprintReport-content').append(content);
+            AJS.dialog2("#calcWorkloadFutureSprintReport-dialog").show();
+        } else {
+            alert("Необходимо сначала запустить расчет");
+        }
     }
 
     // скрываем расширения для задачи списка задач бэклога
