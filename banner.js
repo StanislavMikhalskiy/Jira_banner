@@ -2,8 +2,8 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.4'
-    const environment = "DEV"; // DEV TEST PROD
+    const script_version = '1.14.5'
+    const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -51,7 +51,8 @@
             "postIssueBulk":gc.jira.mainUrl+"/rest/api/2/issue/bulk/", // gc.jira.urls.postIssueBulk
             "postIssueLink":gc.jira.mainUrl+"/rest/api/2/issueLink/", // gc.jira.urls.postIssueLink
             "postTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/",
-            "getTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/"
+            "getTimeTracking":gc.jira.mainUrl+"/rest/adweb/2/timetracking/",
+            "getUserForPicker":gc.jira.mainUrl+"/rest/api/2/user/picker/" // gc.jira.urls.getUserForPicker
         }
         gc.jira['elements'] = { // gc.jira.elements.
             "epicTaskListElemSpanId":"epicTaskListElemSpanId",
@@ -97,7 +98,10 @@
                 },
                 "dev":{
                     "epic":"10000",
-                    "task":"10214"
+                    "task":"10214",
+                    "bug":"10200",
+                    "simple":"10900",
+                    "process":"11700"
                 },
                 "support":{
                     "dev":"10902"
@@ -135,7 +139,8 @@
         // кнопки, которые добавлены через ScriptRunner и на которые вешаем обработчики
         gc['jiraButton'] = [
             { "key":"addNewSystem", "value":"ss-new-system-js", "isEventAdded":false, "tryAddEventCount":0},
-            { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0}]
+            { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0},
+            { "key":"addEpicSmartTasks", "value":"btn-smart-epic", "isEventAdded":false, "tryAddEventCount":0}]
         gc['process'] = {}
 
         // настройки процесса загрузки спринта
@@ -316,6 +321,17 @@
         $element.text("Запустить SMART диалог");
         $menu.append($element);
 
+        // запустить SMART диалог для эпиков
+        $element = $('<a>').attr({
+            class: "drophref",
+            href : "#"
+        })
+            .click(function() {
+                EpicSmartDlgShow();
+            });
+        $element.text("Запустить SMART диалог для эпиков");
+        $menu.append($element);
+
     }
     // добавляем обработчики кнопкам, которые добавлены через ScriptRunner
     function AddEventToButton(){
@@ -346,8 +362,12 @@
                             //$jButton.click(function() { showFlag('message', 'title'); });
                             $jButton.click(function() { cns_createNewSystem() });
                             break; }
+                        case "addEpicSmartTasks": {
+                            $jButton.click(function() { EpicSmartDlgShow() });
+                            break; }
                     }
                     x.isEventAdded = true;
+                    $jButton.css({"backgroundColor": "#c6d9f8"});
                     log("Найдена кнопка $jButton = "+x.key);
                 } else {
                     // не нашли элемент
@@ -357,9 +377,6 @@
             }
         }
     }
-
-    // подписываемся на события
-    //document.addEventListener("DOMContentLoaded", DOMContentLoaded);
 
     // отобразить пользователю флаг
     function showFlag(message, title, type = "info", typeClose = "manual"){
@@ -607,7 +624,7 @@
             }
         )
     }
-    // создает новую задачу
+    // выставляет оценку стоимости задачи
     function setTimeTracking(issueKey, roleId, originalEstimate,process="Unknown"){
         return new Promise(function(resolve,reject){
             let url = new URL(gc.jira.urls.postTimeTracking+issueKey);
@@ -3072,6 +3089,419 @@ where p.pub_id = 9\n
 
         const end = new Date().getTime();
         log(`Время работы: ${end - start} мс`);
+    }
+
+    // массовое создание задач в эпиках
+    function EpicSmartDlgAddNewTask(taskType) {
+        let preffix = '';
+        switch(taskType) {
+            case "backend": {
+                preffix = "[B] ";
+                break; }
+            case "frontend": {
+                preffix = "[F] ";
+                break; }
+        }
+        EpicSmartDlgAddAnyTasks("subtask",taskType,`${preffix}`);
+    }
+    function EpicSmartDlgAddAnyTasks(classSubtask, classSubtaskDetail, taskName){
+        let count = gc.process.epicSmartDlg.task_count++;
+        let id_postfix = `_${classSubtask}_${classSubtaskDetail}_${count}`
+        let class_name = `${classSubtask} ${classSubtaskDetail} ${classSubtaskDetail}_${count}`
+        // определяем группу полей
+        let $fieldset = $(`#fieldset_${classSubtaskDetail}`);
+        // добавляем общий div
+        //<form class="aui">
+        let $div = $('<form>').attr({
+            'id': 'form' + id_postfix,
+            'class': class_name+" aui"
+        });
+        $fieldset.append($div);
+        // добавляем в div строку ввода имени задачи
+        $div.append( EpicSmartDlgCreateTaskNameElement(id_postfix, class_name+" edit-element smart-task-name", `${taskName}`,count,classSubtaskDetail) );
+        // добавляем в div строку ввода оценки задачи
+        $div.append( EpicSmartDlgCreateTaskEstimateElement(id_postfix, class_name+" edit-element smart-task-estimate", count,classSubtaskDetail) );
+        // добавляем в div строку ввода ответственного за задачу
+        $div.append( EpicSmartDlgCreateTaskAssigneeElement(id_postfix, class_name+" edit-element smart-task-assignee", count,classSubtaskDetail) );
+        // добавляем кнопку удаления группы элементов
+        $div.append( EpicSmartDlgCreateBtnDeleteElement(id_postfix, class_name) );
+    }
+    function EpicSmartDlgCreateTaskNameElement(postfix, className, taskName, index, issueType) {
+        let $element = $('<input>').attr({
+            'id': 'input_name' + postfix,
+            'class': className+" text long-field",
+            'type': 'text',
+            'value': taskName,
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            });;
+        return $element;
+    }
+    function EpicSmartDlgCreateTaskEstimateElement(postfix, className, index, issueType) {
+        let $element = $('<input>').attr({
+            'id': 'input_estm' + postfix,
+            'class': className+" text short-field",
+            'type': 'number',
+            'min': '0',
+            'max': '240',
+            'placeholder': 'Оценка в часах',
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            });
+        return $element;
+    }
+    function EpicSmartDlgCreateTaskAssigneeElement(postfix, className, index, issueType) {
+        let $div = $('<div>').attr({
+            'id': 'div_input_assignee' + postfix,
+            'class': className+" search_box"
+        });
+        let $div_search_result = $('<div>').attr({
+            'id': 'div_input_assignee_result' + postfix,
+            'class': className+""
+        });
+        let $element = $('<input>').attr({
+            'id': 'input_assignee' + postfix,
+            'class': className+" text medium-field search_box_empty",
+            'type': 'text',
+            'placeholder': 'Ответственный',
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                'margin-right':'5px'
+            })
+            .attr({'autocomplete': 'on'
+            })
+            .keyup(function() {
+                let $result = $('#div_input_assignee_result'+ postfix);
+                let search_text = $(this).val();
+                //log(`search = ${search_text}`);
+                let url = new URL(gc.jira.urls.getUserForPicker);
+                let requestParams = [{key:'maxResults',value:'30'},{key:'query',value:search_text},{key:'showAvatar',value:'false'}];
+                for (let x of requestParams) {
+                    url.searchParams.set(x.key, x.value);
+                }
+                // подсветка
+                if ((search_text != '') && (search_text.length > 0)){
+                    $(this).css({
+                        borderColor:"#fd4836"
+                    })
+                } else {
+                    $(this).css({
+                        borderColor:"#c1c7d0"
+                    })
+                }
+                // search_box #fd4836 #5d9d20
+                if ((search_text != '') && (search_text.length > 1)){
+                    $.ajax({
+                        type: "GET",
+                        url: url,
+                        data: {},
+                        success: function(msg){
+                            //log(`msg = ${JSON.stringify(msg)}`);
+                            let obj = msg;
+                            //log(`msg = ${JSON.stringify(obj)}`);
+                            if ('total' in obj && obj.total > 0) {
+                                let html = `<div class="search_result"> <table class="aui">`
+                                for (let user of obj.users) {
+                                    html+=`<tr>`
+                                    html+=`<td class="search_result-name">
+                                    <button class="aui-button aui-button-link search_result-btn" data-parent="input_assignee${postfix}" data-user="${user.name}">${user.displayName} (${user.name})</button>
+                                    </td>`
+                                    html+=`</tr>`
+                                }
+                                html+=`</table> </div>`
+                                $result.html(html);
+                                $result.fadeIn();
+                                $(`.search_result-btn`).each(function(i,elem) {
+                                    $(elem).click(function(){
+                                        //log($(elem).attr("data-user"));
+                                        //log($(elem).attr("data-parent"));
+                                        let parent = $(`#${$(elem).attr("data-parent")}`)
+                                        parent.attr("data-user",$(elem).attr("data-user"));
+                                        parent.val($(elem).attr("data-user"));
+                                        parent.css({
+                                            borderColor:"#5d9d20"
+                                        })
+                                        $result.html('');
+                                        $result.fadeOut(100);
+                                    });
+                                });
+                            } else {
+                                $result.fadeOut(100);
+                            }
+                        }
+                    });
+                } else {
+                    $result.html('');
+                    $result.fadeOut(100);
+                }
+            })
+
+        $div.append($element);
+        $div.append($div_search_result);
+        return $div;
+    }
+    function EpicSmartDlgCreateBtnDeleteElement(postfix, className) {
+        let $element = $('<input>').attr({
+            id: 'btn' + postfix,
+            class: className + " btnDelete aui-button",
+            type: 'button',
+            value: 'Удалить'
+        })
+            .css({
+                'margin-left':'5px'
+            })
+            .click(function() {
+                EpicSmartDlgDeleteTaskElements(postfix);
+            });
+        /*var $div = $('<div>').attr({
+            'id': 'div' + postfix,
+            'class': className+" aui-buttons"
+        });
+        $div.append($element);*/
+        return $element;
+    }
+    function EpicSmartDlgDeleteTaskElements(value) {
+        //alert(`${index} ${type}`);
+        $(`form#form${value}`).remove()
+    }
+    function EpicSmartDlgCreateTasks(){
+        // формируем массив данных для создания задач
+        let tasks_data = [];
+        // получаем все елементы с данными (кроме эпика в проекте разработки)
+        let $newTaskNameElemenst = $(".smart-task-name");
+        if ($newTaskNameElemenst.length>0) {
+            // обходим только элементы с именем задачи и уже на основе их индекса работаем с другими
+            $newTaskNameElemenst.each(function(indx){
+                let index = $(this).attr("data-smart-id");
+                let issue_type = $(this).attr("data-issue-type");
+                let task_name = $(this).val(); if (task_name.length == 0) task_name = "Имя задачи не задано";
+                let task_estimate = $(`.${issue_type} .smart-task-estimate[data-smart-id="${index}"]`).val(); if (task_estimate.length == 0) task_estimate = 0; // $newTaskEstimateElemenst.find("#input_estm_subtask_backend*").length; //$(".edit-element[smart-index2='2']").length;   [data-smart-id="${index}"]
+                let task_assignee = $(`.${issue_type} .smart-task-assignee[data-smart-id="${index}"]`).val();
+                //log(`issue_type ${issue_type} index ${index} task_name ${task_name} task_estimate ${task_estimate}`);
+                tasks_data.push({"issue_type":issue_type, "task_name":task_name, "task_estimate":task_estimate, "task_assignee":task_assignee});
+            });
+            if (tasks_data.length >0 ) {
+                let data = {"issueUpdates": []};
+                let issueTimeTracking = [];
+                for (let task of tasks_data) {
+                    let issueTypeId = gc.jira.fields.issueTypes.dev.task;
+                    switch(task.issue_type) {
+                        case "backend": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.task;
+                            break; }
+                        case "frontend": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.task;
+                            break; }
+                        case "task": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.task;
+                            break; }
+                        case "bug": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.bug;
+                            break; }
+                        case "simple": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.simple;
+                            break; }
+                        case "process": {
+                            issueTypeId = gc.jira.fields.issueTypes.dev.process;
+                            break; }
+                    }
+                    let x = {"fields": {
+                            "summary":task.task_name,
+                            "description":task.task_name,
+                            "assignee": { "name": task.task_assignee},
+                            "project": {"key":gc.current_issue_data.projectKey},
+                            "issuetype": {"id": issueTypeId},
+                            [gc.jira.fields.epicLink]:gc.current_issue_data.key//,
+                            //"timetracking":{"originalEstimate": task.task_estimate}
+                        }}
+                    data.issueUpdates.push(x);
+                    let time = { "key" : "", "estimatesRoleId":gc.jira.fields.timeTracking.Role.Developer.id,"originalEstimate": task.task_estimate};
+                    issueTimeTracking.push(time);
+
+                }
+                //log(`${JSON.stringify(data)}`);
+                let prTasks =  createIssuesBulk(data,"EpicSmartDlg");
+                prTasks.then(
+                    result => {
+                        let obj = JSON.parse(result);
+                        //log(`${JSON.stringify(obj)}`);
+                        if (obj && 'issues' in obj && obj.issues != null) {
+                            showFlag(`Задачи для эпика ${gc.current_issue_data.key} успешно созданы. Приступаем к корректировке оценок.`,"Внимание!","success","auto");
+                            log(`Задачи для эпика ${gc.current_issue_data.key} успешно созданы`);
+                            // готовим данные для задания времени
+                            for (let i = 0; i < obj.issues.length; i++) {
+                                issueTimeTracking[i].key = obj.issues[i].key;
+                            }
+                            //log(`${JSON.stringify(issueTimeTracking)}`);
+                            // запускаем обновление времени по задачам
+                            setTimeout(cns_setTimeTrackingRecurse,100,issueTimeTracking,"EpicSmartDlg");
+                        } else {
+                            log(`Ошибка обработки данных по задачам эпика`);
+                            showFlag(`Ошибка обработки данных по задачам эпика`,"Внимание!","error");
+                        }
+                    },
+                    error => {
+                        log(`Ошибка создания задач для эпика ${gc.current_issue_data.key}`);
+                        showFlag(`Ошибка создания задач для эпика ${gc.current_issue_data.key}`,"Внимание!","error");
+                    }
+                )
+            }
+        }
+    }
+    function EpicSmartDlgShow(){
+        let dID = "epicSmart-dialog"
+        if ( !($('*').is(`#${dID}`)) ) {
+            // добавляем счетчик для элементов
+            gc.process["epicSmartDlg"] = {"task_count":0}
+            let dialog = `
+<section id="${dID}" class="aui-dialog2 aui-dialog2-xlarge aui-layer ${dID}" role="dialog" aria-hidden="true">
+<header class="aui-dialog2-header">
+<h2 id="${dID}-epic-key">...</h2></br>
+</header>
+<div id="${dID}-content" class="aui-dialog2-content">
+    <fieldset id="fieldset_backend" class="smart-fieldset">
+        <legend>Backend</legend>
+        <button id="btn_backend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_frontend" class="smart-fieldset">
+        <legend>Frontend</legend>
+        <button id="btn_frontend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_task" class="smart-fieldset">
+        <legend>Task</legend>
+        <button id="btn_task_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_bug" class="smart-fieldset">
+        <legend>Bug</legend>
+        <button id="btn_bug_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"bug">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_simple" class="smart-fieldset">
+        <legend>Simple</legend>
+        <button id="btn_simple_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"simple">Добавить</button>
+    </fieldset>
+    <fieldset id="fieldset_process" class="smart-fieldset">
+        <legend>Process</legend>
+        <button id="btn_process_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"process">Добавить</button>
+    </fieldset>
+</div>
+<footer class="aui-dialog2-footer">
+    <div class="aui-dialog2-footer-actions">
+        <button id="epicSmart-submit-button" class="aui-button aui-button-primary">Ok</button>
+        <button id="epicSmart-cancel-button" class="aui-button aui-button-link">Отмена</button>
+    </div>
+</footer>
+</section>
+
+<style>
+.${dID} {
+   width: 900px;
+}
+.smart-fieldset{
+	border-width: 1px;
+    margin-bottom: 15px;
+}
+body {
+	font-size:14px;
+	padding: 15px 20px;
+}
+.search_box {
+	position: relative;
+	display: inline-block;
+}
+.search_box input[type="text"] {
+	display: block;
+	width: 100%;    
+	//height: 35px;
+	//line-height: 35px;
+	padding: 0;
+	margin: 0;
+	border: 1px solid #c1c7d0;
+	//outline: none;
+	overflow: hidden;
+	border-radius: 4px;
+	background-color: rgb(255, 255, 255);
+	text-indent: 10px;
+	font-size: 14px;
+	color: #222;
+}
+
+/* Стили для плашки с результатами */
+.search_result {
+	position: absolute;
+	top: 120%;
+	left: -585px;
+	border: 1px solid #ddd;
+	background: #fff;
+	padding: 10px;
+	z-index: 9999;
+	box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+}
+.search_result table {
+	border-collapse: collapse;
+	border-spacing: 0;
+	width: 100%;
+	table-layout: fixed;
+}
+.search_result td {
+	padding: 5px 10px;
+	vertical-align: middle;
+}
+.search_result-name {
+	font-weight: 600;
+	font-size: 16px;
+}
+.search_result-btn {
+	width: 150px;
+	text-align: right;
+}
+.search_result-btn a {
+	border-width: 1px;
+	background-color: rgb(253, 72, 54);
+	display: inline-block;
+	font-size: 13px;
+	color: rgb(255, 255, 255);
+	text-decoration: none;
+	padding: 5px;
+}
+</style>
+`;
+            $("body").append(dialog);
+            $("#epicSmart-cancel-button").on('click', function (e) {
+                e.preventDefault();
+                AJS.dialog2(`#${dID}`).hide();
+            });
+            $("#epicSmart-submit-button").on('click', function (e) {
+                e.preventDefault();
+                showFlag(`Запускаем создание задач`,"Внимание!","info","auto");
+                EpicSmartDlgCreateTasks();
+                AJS.dialog2(`#${dID}`).hide();
+
+            });
+            $("#btn_backend_add").click(function() { EpicSmartDlgAddNewTask("backend"); });
+            $("#btn_frontend_add").click(function() { EpicSmartDlgAddNewTask("frontend"); });
+            $("#btn_task_add").click(function() { EpicSmartDlgAddNewTask("task"); });
+            $("#btn_bug_add").click(function() { EpicSmartDlgAddNewTask("bug"); });
+            $("#btn_simple_add").click(function() { EpicSmartDlgAddNewTask("simple"); });
+            $("#btn_process_add").click(function() { EpicSmartDlgAddNewTask("process"); });
+        }
+        if (gc.current_issue_data.key) {
+            $(`#${dID}-epic-key`).text(`Добавление задач в эпик ${gc.current_issue_data.key} (${gc.current_issue_data.projectKey})`);
+
+            AJS.dialog2(`#${dID}`).show();
+        } else {
+            alert("Не удалось определить номер задачи. Перезагрузите страницу и попробуйте снова.");
+        }
+
+
+
     }
 })();
 //</script>
