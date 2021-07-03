@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.5'
+    const script_version = '1.14.6'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -3125,6 +3125,8 @@ where p.pub_id = 9\n
         $div.append( EpicSmartDlgCreateTaskAssigneeElement(id_postfix, class_name+" edit-element smart-task-assignee", count,classSubtaskDetail) );
         // добавляем кнопку удаления группы элементов
         $div.append( EpicSmartDlgCreateBtnDeleteElement(id_postfix, class_name) );
+        // добавляем в div строку ввода описания задачи
+        $div.append( EpicSmartDlgCreateDescriptionElement(id_postfix, class_name+" edit-element smart-task-description", count,classSubtaskDetail) );
     }
     function EpicSmartDlgCreateTaskNameElement(postfix, className, taskName, index, issueType) {
         let $element = $('<input>').attr({
@@ -3248,6 +3250,34 @@ where p.pub_id = 9\n
         $div.append($div_search_result);
         return $div;
     }
+    function EpicSmartDlgCreateDescriptionElement(postfix, className, index, issueType) {
+        let $div = $('<div>').attr({
+            'id': 'div_input_desc' + postfix,
+            'class': className+""
+        }).css({
+            'margin-top':'2px'
+        });
+        let $div_expander = $('<div>').attr({
+            'id': 'div_input_desc_expander' + postfix,
+            'class': className+" aui-expander-content"
+        });
+        let $element = $('<textarea>').attr({
+            'id': 'input_desc' + postfix,
+            'class': className+" textarea",
+            //'type': 'text',
+            //'value': taskName,
+            "data-smart-id":index,
+            "data-issue-type":issueType
+        })
+            .css({
+                //'margin-right':'5px'
+                'max-width':'740px'
+            });
+        $div_expander.append($element);
+        $div.append($div_expander);
+        $div.append(`<a id="a_input_desc_replace_trigger${postfix}" data-replace-text="Скрыть" class="aui-expander-trigger" aria-controls="div_input_desc_expander${postfix}">Еще</a>`);
+        return $div;
+    }
     function EpicSmartDlgCreateBtnDeleteElement(postfix, className) {
         let $element = $('<input>').attr({
             id: 'btn' + postfix,
@@ -3285,8 +3315,9 @@ where p.pub_id = 9\n
                 let task_name = $(this).val(); if (task_name.length == 0) task_name = "Имя задачи не задано";
                 let task_estimate = $(`.${issue_type} .smart-task-estimate[data-smart-id="${index}"]`).val(); if (task_estimate.length == 0) task_estimate = 0; // $newTaskEstimateElemenst.find("#input_estm_subtask_backend*").length; //$(".edit-element[smart-index2='2']").length;   [data-smart-id="${index}"]
                 let task_assignee = $(`.${issue_type} .smart-task-assignee[data-smart-id="${index}"]`).val();
+                let task_desc = $(`.${issue_type} .smart-task-description[data-smart-id="${index}"]`).val();
                 //log(`issue_type ${issue_type} index ${index} task_name ${task_name} task_estimate ${task_estimate}`);
-                tasks_data.push({"issue_type":issue_type, "task_name":task_name, "task_estimate":task_estimate, "task_assignee":task_assignee});
+                tasks_data.push({"issue_type":issue_type, "task_name":task_name, "task_estimate":task_estimate, "task_assignee":task_assignee, "task_desc":task_desc});
             });
             if (tasks_data.length >0 ) {
                 let data = {"issueUpdates": []};
@@ -3315,7 +3346,7 @@ where p.pub_id = 9\n
                     }
                     let x = {"fields": {
                             "summary":task.task_name,
-                            "description":task.task_name,
+                            "description":task.task_desc,
                             "assignee": { "name": task.task_assignee},
                             "project": {"key":gc.current_issue_data.projectKey},
                             "issuetype": {"id": issueTypeId},
@@ -3368,28 +3399,22 @@ where p.pub_id = 9\n
 </header>
 <div id="${dID}-content" class="aui-dialog2-content">
     <fieldset id="fieldset_backend" class="smart-fieldset">
-        <legend>Backend</legend>
-        <button id="btn_backend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+        <button id="btn_backend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Backend</button>
     </fieldset>
     <fieldset id="fieldset_frontend" class="smart-fieldset">
-        <legend>Frontend</legend>
-        <button id="btn_frontend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+        <button id="btn_frontend_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Frontend</button>
     </fieldset>
     <fieldset id="fieldset_task" class="smart-fieldset">
-        <legend>Task</legend>
-        <button id="btn_task_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Добавить</button>
+        <button id="btn_task_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"task">Task</button>
     </fieldset>
     <fieldset id="fieldset_bug" class="smart-fieldset">
-        <legend>Bug</legend>
-        <button id="btn_bug_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"bug">Добавить</button>
+        <button id="btn_bug_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"bug">Bug</button>
     </fieldset>
     <fieldset id="fieldset_simple" class="smart-fieldset">
-        <legend>Simple</legend>
-        <button id="btn_simple_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"simple">Добавить</button>
+        <button id="btn_simple_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"simple">Simple</button>
     </fieldset>
     <fieldset id="fieldset_process" class="smart-fieldset">
-        <legend>Process</legend>
-        <button id="btn_process_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"process">Добавить</button>
+        <button id="btn_process_add" type="button" class="aui-button aui-button-primary btn_add" data-issue-type:"process">Process</button>
     </fieldset>
 </div>
 <footer class="aui-dialog2-footer">
@@ -3407,6 +3432,9 @@ where p.pub_id = 9\n
 .smart-fieldset{
 	border-width: 1px;
     margin-bottom: 15px;
+}
+.btn_add{
+width: 83px;
 }
 body {
 	font-size:14px;
