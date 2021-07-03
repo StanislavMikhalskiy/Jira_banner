@@ -2,8 +2,8 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.6'
-    const environment = "PROD"; // DEV TEST PROD
+    const script_version = '1.14.7'
+    const environment = "DEV"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -486,6 +486,7 @@
 </div>
 <aui-dropdown-menu id="split-container-dropdown-sprintResourceCalc">
     <aui-item-link id="item-sprintResourceCalc-showTaskWithoutEstimate">Задачи без оценки</aui-item-link>
+    <aui-item-link id="item-sprintResourceCalc-showFutureWorkload">Расчет будущих спринтов</aui-item-link>
 </aui-dropdown-menu>`
             toolsTable.append(toolsTableButtonStartCalculation_html);
             // добавляем запуск основного расчета
@@ -500,6 +501,13 @@
             if (toolsTableButtonStartCalculation_item) {
                 toolsTableButtonStartCalculation_item.click(function(){
                     CalcWorkloadFutureSprintReportIssuesWithoutEstimate();
+                });
+            }
+            // добавляем запуск к элементу выпадающего меню
+            let toolsTableButtonStartCalculation_item_showFutureWorkload = $(`#item-sprintResourceCalc-showFutureWorkload`);
+            if (toolsTableButtonStartCalculation_item_showFutureWorkload) {
+                toolsTableButtonStartCalculation_item_showFutureWorkload.click(function(){
+                    CalcWorkloadFutureSprintReportShowFutureWorkload();
                 });
             }
             // заносим данные для debug-меню и теперь для процесса
@@ -1119,7 +1127,7 @@
     function CalcWorkloadFutureSprintReportIssuesWithoutEstimate(){
         if (gc.process.sprintResourceCalc.started) {
             //alert("Функционал находится в разработке.");
-            // ищем наш диалог, еслинет - добавляем
+            // ищем наш диалог, если нет - добавляем
             if ( !($('*').is("#calcWorkloadFutureSprintReport-dialog")) ) {
                 let dialog = `
 <section id="calcWorkloadFutureSprintReport-dialog" class="aui-dialog2 aui-dialog2-xlarge aui-layer calcWorkloadFutureSprintReport-dialog" role="dialog" aria-hidden="true">
@@ -1178,6 +1186,205 @@
         } else {
             alert("Необходимо сначала запустить расчет");
         }
+    }
+    function CalcWorkloadFutureSprintReportShowFutureWorkload(){
+        let dialog_id="calcWorkloadFutureSprintReport-dialog-ShowFutureWorkload"
+        let dialog_jq=`#${dialog_id}`
+        let content_id="calcWorkloadFutureSprintReport-ShowFutureWorkload-content"
+        let content_jq=`#${content_id}`
+        let btnOk_id="calcWorkloadFutureSprintReport-ShowFutureWorkload-submit-button"
+        let btnOk_jq=`#${btnOk_id}`
+        // ищем наш диалог, если нет - добавляем
+        if ( !($('*').is(dialog_jq)) ) {
+            let dialog = `
+<section id="${dialog_id}" class="aui-dialog2 aui-dialog2-xlarge aui-layer ${dialog_id}" role="dialog" aria-hidden="true">
+<header class="aui-dialog2-header">
+Расчет будущих спринтов
+</header>
+<div id="${content_id}" class="aui-dialog2-content">
+</div>
+<footer class="aui-dialog2-footer">
+    <div class="aui-dialog2-footer-actions">
+        <button id="${btnOk_id}" class="aui-button aui-button-primary">Ok</button>
+    </div>
+</footer>
+</section>
+
+<style>
+.${dialog_id} {
+   width: 900px;
+}
+</style>
+`;
+            $("body").append(dialog);
+            $(btnOk_jq).on('click', function (e) {
+                e.preventDefault();
+                AJS.dialog2(dialog_jq).hide();
+            });
+        }
+        // удаляем контент, если он был
+        $(content_jq).empty();
+        let content_report="";
+        let content_error_report="";
+        let futureSprints_el = $('.ghx-backlog-container.ghx-sprint-planned.js-sprint-container');
+        if (futureSprints_el) {
+            content_report+=`Найдено будущих спринтов ${futureSprints_el.length}`;
+            let sprintsData = [];
+            $(futureSprints_el).each(function(indx){
+                let sprintId = $(this).attr('data-sprint-id');
+                //js-edit-sprintName-trigger
+                let sprintName = $(this).find('.js-edit-sprintName-trigger').attr('data-fieldvalue');
+                //content_report+=`</br>${sprintId} ${sprintName}`;
+                let jqlQuery = `Sprint =${sprintId} and status != Closed `;
+                let requestParams = [{key:'maxResults',value:'300'},{key:'jql',value:jqlQuery},{key:'fields',value:'assignee,customfield_11304,summary'},{key:'Detail',value:'CalcWorkloadfutureSprint'}];
+                // получаем результаты запроса - массив задач
+                let objIssues = JSON.parse(GetIssuesByQuery(jqlQuery,requestParams));
+                if (objIssues) {
+                    if ('total' in objIssues && objIssues.total > 0) {
+                        //content_report+=` ${objIssues.total}`;
+                        let futureSprintTasks = [];
+                        for (let objIssue of objIssues.issues) {
+                            let summary = ""
+                            if ( 'summary' in objIssue.fields && objIssue.fields.summary !== null) {
+                                summary = objIssue.fields.summary;
+                            }
+                            let assignee = "";
+                            if ( 'assignee' in objIssue.fields && objIssue.fields.assignee !== null && 'key' in objIssue.fields.assignee ) {
+                                assignee=objIssue.fields.assignee.key
+                            }
+                            let sprintTaskInfo = {
+                                issueKey:objIssue.key,
+                                assignee:assignee,
+                                summary:summary,
+                                roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                            }
+                            // обрабатывам роли из задачи
+                            if ( 'customfield_11304' in objIssue.fields && objIssue.fields.customfield_11304 !== null) {
+                                for (let roleCustomField of objIssue.fields.customfield_11304) {
+                                    let roleLogin = ParseRoleLogin(roleCustomField);
+                                    //Smart_log(`${ln} ParseRoleLogin = ${roleLogin}, roleCustomField = ${roleCustomField}`);
+                                    let roleCode = ParseRoleCode(roleCustomField);
+                                    //Smart_log(`${ln} ParseRoleCode = !${roleCode}!`);
+
+                                    switch(roleCode) {
+                                        case "10206": {
+                                            for(let role of sprintTaskInfo.roles) {
+                                                if (role.key == "Developers") { role.assignee = roleLogin }
+                                            }
+                                            break;
+                                        }
+                                        case "10404": {
+                                            for(let role of sprintTaskInfo.roles) {
+                                                if (role.key == "QA") { role.assignee = roleLogin }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            // добавляем данные по задачам в массив
+                            futureSprintTasks.push(sprintTaskInfo);
+                        }
+                        if (futureSprintTasks.length>0) {
+                            // для каждой задачи получаем информацию по оценке
+                            for (let futureSprintTask of futureSprintTasks) {
+                                //Smart_log(`${ln} для каждой задачи получаем информацию по оценке futureSprintTask.issueKey = ${futureSprintTask.issueKey}`);
+                                let objIssueTimetracking = JSON.parse(GetIssueTimetracking(futureSprintTask.issueKey));
+                                if (objIssueTimetracking) {
+                                    //Smart_log(`${ln} objIssueTimetracking = ${JSON.stringify(objIssueTimetracking)}`);
+                                    if ('estimates' in objIssueTimetracking) {
+                                        if (objIssueTimetracking.estimates.length > 0) {
+                                            // обходим имеющиеся оценки
+                                            for(let r=0; r<objIssueTimetracking.estimates.length; r++) {
+                                                for(let ro=0; ro<futureSprintTask.roles.length; ro++) {
+                                                    //Smart_log(ln+` ${futureSprintTask.issueKey} ${objIssueTimetracking.estimates[r].role} ${futureSprintTask.roles[ro].key}`);
+                                                    if (objIssueTimetracking.estimates[r].role == futureSprintTask.roles[ro].key)
+                                                    {
+                                                        if ("remainingEstimateSeconds" in objIssueTimetracking.estimates[r]) { // originalEstimateSeconds
+                                                            futureSprintTask.roles[ro].estimate = objIssueTimetracking.estimates[r].remainingEstimateSeconds;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else content_error_report+=`</br>Отсутствуют данные objIssueTimetracking для ${futureSprintTask.issueKey}`;
+                                    } else content_error_report+=`</br>Отсутствуют данные estimates (issueKey=${objIssueTimetracking.key})`;
+                                } else content_error_report+=`</br>GetIssueTimetracking - данные не были получены (issueKey=${futureSprintTask.issueKey})`;
+                                //content_report+=`</br>${futureSprintTask.issueKey} ${futureSprintTask.assignee}`;
+                            }
+                            let developersEstimates = [];
+                            if ('team' in gc.process.ViewEstimationsOnPlaning_objPermission && gc.process.ViewEstimationsOnPlaning_objPermission.team != null && gc.process.ViewEstimationsOnPlaning_objPermission.team.length > 0) {
+                                for (let developer of gc.process.ViewEstimationsOnPlaning_objPermission.team) {
+                                    let developerInfo = {
+                                        key:developer.key,
+                                        estimate:0,
+                                        dataFilterId:developer.dataFilterId,
+                                        role:developer.role,
+                                        hasTaskWithoutEstimate:false
+                                    }
+                                    //Smart_log(ln+`developerInfo.key = ${developerInfo.key}, developerInfo.dataFilterId = ${developerInfo.dataFilterId}, developerInfo.role = ${developerInfo.role}`);
+                                    // получаем массив задач, назначенный на разработчика
+                                    let assigneeTasks = futureSprintTasks.filter(issue => issue.assignee === developer.key)
+                                    if (!!assigneeTasks && assigneeTasks.length>0) {
+                                        // обходим массив отфильтрованных задач по assignee
+                                        for (let task of assigneeTasks) {
+                                            // roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                                            // обходим массив ролей в задаче
+                                            for (let taskRole of task.roles) {
+                                                if (taskRole.key == developerInfo.role) {
+                                                    if (taskRole.estimate>0) {
+                                                        developerInfo.estimate += taskRole.estimate;
+                                                    }
+                                                    else {
+                                                        developerInfo.hasTaskWithoutEstimate = true;
+                                                        //log(`task.key = ${task.issueKey}, task.remainingEstimate = ${taskRole.estimate}, task.assignee = ${task.assignee}`);
+                                                        // добавляем информацию о задачах без оценки для вывода в отчет
+                                                        // проверяем, был ли данный разработчик уже добавлен
+                                                        //log(JSON.stringify(gc.process.sprintResourceCalc.report.issuesWithoutEstimate));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    developersEstimates.push(developerInfo);
+                                    //content_report+=`</br>${developerInfo.key} ${developerInfo.estimate}`;
+                                }
+
+                            } else content_error_report+=`</br>Нет данных по разработчикам. Проверьте конфиг команды`;
+                            // futureSprintTasks developersEstimates
+                            /*
+                            {
+                                issueKey:objIssue.key,
+                                assignee:assignee,
+                                summary:summary,
+                                roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                            }
+
+                            {
+                                key:developer.key,
+                                estimate:0,
+                                dataFilterId:developer.dataFilterId,
+                                role:developer.role,
+                                hasTaskWithoutEstimate:false
+                            }
+                            * */
+
+
+
+
+                        } else content_error_report+=`</br>Не удалось обработать массив задач для спринта ${sprintId} ${sprintName}`;
+                    } else content_error_report+=`</br>В спринте нет задач или данные по ним не получены ${sprintId} ${sprintName}`;
+                } else content_error_report+=`</br>Не удалось получить данные по спринту ${sprintId} ${sprintName}`;
+
+
+
+                sprintsData.push({"sprintId":sprintId,"sprintName":sprintName});
+            });
+        } else content_error_report+="Будущих спринтов не найдено";
+        /*
+        * получить все задачи в будущих спринтах*/
+        content_report+=`</br>${content_error_report}`
+        $(content_jq).append(content_report);
+        AJS.dialog2(dialog_jq).show();
     }
 
     // скрываем расширения для задачи списка задач бэклога
