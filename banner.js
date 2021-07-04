@@ -3,7 +3,7 @@
     // Автор: Михальский Станислав, 2019-2021
 
     const script_version = '1.14.7'
-    const environment = "DEV"; // DEV TEST PROD
+    const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -1194,7 +1194,7 @@
         let content_jq=`#${content_id}`
         let btnOk_id="calcWorkloadFutureSprintReport-ShowFutureWorkload-submit-button"
         let btnOk_jq=`#${btnOk_id}`
-        // ищем наш диалог, если нет - добавляем
+        // ищем наш диалог, если нет - добавляем table[class~="SFWl_table"] tr:first-child
         if ( !($('*').is(dialog_jq)) ) {
             let dialog = `
 <section id="${dialog_id}" class="aui-dialog2 aui-dialog2-xlarge aui-layer ${dialog_id}" role="dialog" aria-hidden="true">
@@ -1212,7 +1212,46 @@
 
 <style>
 .${dialog_id} {
-   width: 900px;
+   width: 100%;
+}
+.SFWl_table {
+    font-family: "Lucida Sans Unicode", "Lucida Grande", Sans-Serif;
+    font-size: 14px;
+    text-align: center;
+    border-collapse: collapse;
+    background: #252F48;
+    margin: 10px;
+    width: 100%;
+}
+.SFWl_table th {
+    color: #EDB749;
+    border-bottom: 1px solid #37B5A5;
+    padding: 12px 17px;
+}
+.SFWl_table td {
+    color: #CAD4D6;
+    border-bottom: 1px solid #37B5A5;
+    border-right:1px solid #37B5A5;
+    padding: 7px 17px;
+}
+.SFWl_table td:first-child {
+    text-align: left;
+    width: 130px;
+}
+.SFWl_table tr:last-child td {
+  border-bottom: none;
+}
+.SFWl_table tr:first-child td {
+  width: 200px;
+}
+.SFWl_table tr:nth-child(even) {
+  background: #2e3955;
+}
+.SFWl_table td:last-child {
+  border-right: none;
+}
+.SFWl_table tr:hover td {
+  color: #d04545;
 }
 </style>
 `;
@@ -1228,20 +1267,32 @@
         let content_error_report="";
         let futureSprints_el = $('.ghx-backlog-container.ghx-sprint-planned.js-sprint-container');
         if (futureSprints_el) {
-            content_report+=`Найдено будущих спринтов ${futureSprints_el.length}`;
+            //content_report+=`Найдено будущих спринтов: ${futureSprints_el.length}`;
+            log(`Найдено будущих спринтов: ${futureSprints_el.length}`);
+            // получение списка разработчиков
+            let developersEstimates = [];
+            if ('team' in gc.process.ViewEstimationsOnPlaning_objPermission && gc.process.ViewEstimationsOnPlaning_objPermission.team != null && gc.process.ViewEstimationsOnPlaning_objPermission.team.length > 0) {
+                for (let developer of gc.process.ViewEstimationsOnPlaning_objPermission.team) {
+                    let developerInfo = {
+                        key:developer.key,
+                        sprints:{},
+                        dataFilterId:developer.dataFilterId,
+                        role:developer.role
+                    }
+                    developersEstimates.push(developerInfo);
+                }
+            } else content_error_report+=`</br>Нет данных по разработчикам. Проверьте конфиг команды`;
             let sprintsData = [];
             $(futureSprints_el).each(function(indx){
                 let sprintId = $(this).attr('data-sprint-id');
-                //js-edit-sprintName-trigger
                 let sprintName = $(this).find('.js-edit-sprintName-trigger').attr('data-fieldvalue');
-                //content_report+=`</br>${sprintId} ${sprintName}`;
+                log(`sprintId ${sprintId} sprintName ${sprintName}`);
                 let jqlQuery = `Sprint =${sprintId} and status != Closed `;
                 let requestParams = [{key:'maxResults',value:'300'},{key:'jql',value:jqlQuery},{key:'fields',value:'assignee,customfield_11304,summary'},{key:'Detail',value:'CalcWorkloadfutureSprint'}];
                 // получаем результаты запроса - массив задач
                 let objIssues = JSON.parse(GetIssuesByQuery(jqlQuery,requestParams));
                 if (objIssues) {
                     if ('total' in objIssues && objIssues.total > 0) {
-                        //content_report+=` ${objIssues.total}`;
                         let futureSprintTasks = [];
                         for (let objIssue of objIssues.issues) {
                             let summary = ""
@@ -1311,74 +1362,87 @@
                                 } else content_error_report+=`</br>GetIssueTimetracking - данные не были получены (issueKey=${futureSprintTask.issueKey})`;
                                 //content_report+=`</br>${futureSprintTask.issueKey} ${futureSprintTask.assignee}`;
                             }
-                            let developersEstimates = [];
-                            if ('team' in gc.process.ViewEstimationsOnPlaning_objPermission && gc.process.ViewEstimationsOnPlaning_objPermission.team != null && gc.process.ViewEstimationsOnPlaning_objPermission.team.length > 0) {
-                                for (let developer of gc.process.ViewEstimationsOnPlaning_objPermission.team) {
-                                    let developerInfo = {
-                                        key:developer.key,
-                                        estimate:0,
-                                        dataFilterId:developer.dataFilterId,
-                                        role:developer.role,
-                                        hasTaskWithoutEstimate:false
-                                    }
-                                    //Smart_log(ln+`developerInfo.key = ${developerInfo.key}, developerInfo.dataFilterId = ${developerInfo.dataFilterId}, developerInfo.role = ${developerInfo.role}`);
-                                    // получаем массив задач, назначенный на разработчика
-                                    let assigneeTasks = futureSprintTasks.filter(issue => issue.assignee === developer.key)
-                                    if (!!assigneeTasks && assigneeTasks.length>0) {
-                                        // обходим массив отфильтрованных задач по assignee
-                                        for (let task of assigneeTasks) {
-                                            // roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
-                                            // обходим массив ролей в задаче
-                                            for (let taskRole of task.roles) {
-                                                if (taskRole.key == developerInfo.role) {
-                                                    if (taskRole.estimate>0) {
-                                                        developerInfo.estimate += taskRole.estimate;
-                                                    }
-                                                    else {
-                                                        developerInfo.hasTaskWithoutEstimate = true;
-                                                        //log(`task.key = ${task.issueKey}, task.remainingEstimate = ${taskRole.estimate}, task.assignee = ${task.assignee}`);
-                                                        // добавляем информацию о задачах без оценки для вывода в отчет
-                                                        // проверяем, был ли данный разработчик уже добавлен
-                                                        //log(JSON.stringify(gc.process.sprintResourceCalc.report.issuesWithoutEstimate));
-                                                    }
+                            // обработка списка разработчиков
+                            for (let developer of developersEstimates) {
+                                //Smart_log(ln+`developerInfo.key = ${developerInfo.key}, developerInfo.dataFilterId = ${developerInfo.dataFilterId}, developerInfo.role = ${developerInfo.role}`);
+                                // получаем массив задач, назначенный на разработчика
+                                let assigneeTasks = futureSprintTasks.filter(issue => issue.assignee === developer.key)
+                                if (!!assigneeTasks && assigneeTasks.length>0) {
+                                    developer.sprints[sprintId]={estimate:0,hasTaskWithoutEstimate:false,tasks:[]}
+                                    // обходим массив отфильтрованных задач по assignee
+                                    for (let task of assigneeTasks) {
+                                        // roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+                                        let task_info = {
+                                            issueKey:task.issueKey,
+                                            summary:task.summary,
+                                            estimate:0
+                                        }
+                                        // обходим массив ролей в задаче
+                                        for (let taskRole of task.roles) {
+                                            if (taskRole.key == developer.role) {
+                                                if (taskRole.estimate>0) {
+                                                    developer.sprints[sprintId].estimate += taskRole.estimate;
+                                                    task_info.estimate=taskRole.estimate;
+                                                }
+                                                else {
+                                                    developer.sprints[sprintId].hasTaskWithoutEstimate = true;
                                                 }
                                             }
                                         }
+                                        developer.sprints[sprintId].tasks.push(task_info);
                                     }
-                                    developersEstimates.push(developerInfo);
-                                    //content_report+=`</br>${developerInfo.key} ${developerInfo.estimate}`;
+                                    //content_report+=`</br>${developer.key} ${developer.sprints[sprintId].estimate}`;
                                 }
-
-                            } else content_error_report+=`</br>Нет данных по разработчикам. Проверьте конфиг команды`;
-                            // futureSprintTasks developersEstimates
-                            /*
-                            {
-                                issueKey:objIssue.key,
-                                assignee:assignee,
-                                summary:summary,
-                                roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
                             }
-
-                            {
-                                key:developer.key,
-                                estimate:0,
-                                dataFilterId:developer.dataFilterId,
-                                role:developer.role,
-                                hasTaskWithoutEstimate:false
-                            }
-                            * */
-
-
-
-
                         } else content_error_report+=`</br>Не удалось обработать массив задач для спринта ${sprintId} ${sprintName}`;
                     } else content_error_report+=`</br>В спринте нет задач или данные по ним не получены ${sprintId} ${sprintName}`;
                 } else content_error_report+=`</br>Не удалось получить данные по спринту ${sprintId} ${sprintName}`;
-
-
-
                 sprintsData.push({"sprintId":sprintId,"sprintName":sprintName});
             });
+            /*
+            futureSprintTasks
+            {
+                issueKey:objIssue.key,
+                assignee:assignee,
+                summary:summary,
+                roles :[{key:"Developers", assignee:"", estimate:0},{key:"QA", assignee:"", estimate:0}]
+            }
+            developersEstimates
+            {
+                key:developer.key,
+                dataFilterId:developer.dataFilterId,
+                role:developer.role,
+                sprints:{estimate:0,hasTaskWithoutEstimate:false,tasks:[{issueKey,summary,estimate}]
+            }
+            * */
+            if (developersEstimates.length>0 && sprintsData.length>0) {
+                let content_table = `<table class="SFWl_table">` //style="width: 100%"
+                // добавляем заголовки
+                content_table += `<tr>`
+                content_table += `<th>Разработчик</th>`
+                for (let sprint of sprintsData) {
+                    content_table += `<th>${sprint.sprintName}</th>`
+                }
+                content_table += `</tr>`
+                // Добавляем строки
+                for (let developer of developersEstimates) {
+                    content_table += `<tr>`
+                    content_table += `<td>${developer.key}</td>`
+                    for (let sprint of sprintsData) {
+                        let estimate = "";
+                        if (sprint.sprintId in developer.sprints) {
+                            //let estimate = developerEstimate.estimate/60/60;
+                            //let templateValue = estimate.toFixed(1);
+                            estimate = (developer.sprints[sprint.sprintId].estimate/60/60).toFixed(0);
+                        }
+                        content_table += `<td>${estimate}</td>`
+                    }
+                    content_table += `</tr>`
+                }
+
+                content_table += `</table>`
+                content_report+=content_table;
+            }
         } else content_error_report+="Будущих спринтов не найдено";
         /*
         * получить все задачи в будущих спринтах*/
