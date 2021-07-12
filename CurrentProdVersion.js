@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.9'
+    const script_version = '1.14.10'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -1033,13 +1033,25 @@
                     }
                     let sprint = ""
                     if ( gc.jira.fields.taskMetaDataSprint in objIssue.fields && objIssue.fields[gc.jira.fields.taskMetaDataSprint] !== null && objIssue.fields[gc.jira.fields.taskMetaDataSprint].length>0 ) {
-                        // "com.atlassian.greenhopper.service.sprint.Sprint@5370a4f[id=4589,rapidViewId=136,state=FUTURE,name=SS 21.33,startDate=<null>,endDate=<null>,completeDate=<null>,sequence=4589,goal=<null>]"
-                        let str = objIssue.fields[gc.jira.fields.taskMetaDataSprint][0];
-                        let ind1 = str.indexOf('id=');
-                        if (ind1 > -1) {
-                            let ind2 = str.indexOf(',', ind1);
-                            sprint = str.slice(ind1+3,ind2)
+                        /*
+"customfield_10104": [
+"com.atlassian.greenhopper.service.sprint.Sprint@346e5a82[id=4511,rapidViewId=479,state=CLOSED,name=ASE Sprint 21.25,startDate=2021-06-21T11:43:43.410+03:00,endDate=2021-06-26T11:43:00.000+03:00,completeDate=2021-06-28T10:05:50.640+03:00,sequence=4511,goal=1. Сайты - отказ от sendsayDD на PROD\n2. ГБ - синк редблоков на PROD (сам синк может быть не закончен)\n3. ГБ - сервис учетная политика на PROD]",
+"com.atlassian.greenhopper.service.sprint.Sprint@29e76da8[id=4512,rapidViewId=479,state=CLOSED,name=ASE Sprint 21.26,startDate=2021-06-28T11:36:39.785+03:00,endDate=2021-07-03T11:36:00.000+03:00,completeDate=2021-07-04T20:16:10.135+03:00,sequence=4512,goal=1. Сайты - автописьма СС на RC \n2. Реестры - скрытие навыков на PROD]",
+"com.atlassian.greenhopper.service.sprint.Sprint@7d0d2a37[id=4513,rapidViewId=479,state=CLOSED,name=ASE Sprint 21.27,startDate=2021-07-05T11:35:21.161+03:00,endDate=2021-07-10T11:35:00.000+03:00,completeDate=2021-07-09T19:03:00.767+03:00,sequence=4513,goal=Автописьма на прод (релиз 90)]",
+"com.atlassian.greenhopper.service.sprint.Sprint@2f67c41[id=4580,rapidViewId=479,state=FUTURE,name=ASE Sprint 21.28,startDate=<null>,endDate=<null>,completeDate=<null>,sequence=4580,goal=1. Сервисы ГБ на бою (контент + переключение трафика)  2. Печатка. Деплой по сегментам. На проде.]"
+]
+                        * */
+                        for (let sprintTaskData of objIssue.fields[gc.jira.fields.taskMetaDataSprint]) {
+                            if (sprintTaskData.indexOf('state=FUTURE')>-1) {
+                                let ind1 = sprintTaskData.indexOf('id=');
+                                if (ind1 > -1) {
+                                    let ind2 = sprintTaskData.indexOf(',', ind1);
+                                    sprint = sprintTaskData.slice(ind1+3,ind2)
+                                }
+                                break;
+                            }
                         }
+
                     }
                     let sprintTaskInfo = {
                         issueKey:objIssue.key,
@@ -1078,7 +1090,7 @@
                             role.estimate = ParseRoleEstimateFromTask(objIssue.fields[gc.jira.fields.taskMetaDataEstimateByRole],role.key);
                         }
                     } else log(`Нет данных по оценкам ролей ${gc.jira.fields.taskMetaDataEstimateByRole}`);
-                    //log(`${sprintTaskInfo.issueKey} ${sprintTaskInfo.assignee} ${sprintTaskInfo.roles[0].estimate}`);
+                    log(`objIssues.issues: ${sprintTaskInfo.issueKey} ${sprintTaskInfo.assignee} ${sprintTaskInfo.roles[0].estimate/60/60}`);
                     //log(`data ${JSON.stringify(objIssue)}`);
                     // добавляем данные по задачам в массив
                     gc.process.sprintResourceCalc.reportAllFutureSprints.tasks.push(sprintTaskInfo);
@@ -1129,8 +1141,9 @@
                                     }
                                 }
                                 developer.sprints[sprint.sprintId].tasks.push(task_info);
+                                log(`assigneeTasks: ${developer.key} ${task.issueKey} ${task_info.estimate/60/60}`);
                             }
-                            //log(`${developer.key} ${developer.sprints[sprint.sprintId].estimate}`);
+                            log(`sprint estimate: ${developer.key} ${developer.sprints[sprint.sprintId].estimate/60/60}`);
                         }
                     }
                 }
