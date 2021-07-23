@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.10'
+    const script_version = '1.14.11'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -170,6 +170,7 @@
         // настройки для процесса отображения статусов задач на доске бэклога для первого активного спринта
         gc.process["showStatesOnBacklogBoard"] = {
             "canShow":false,
+            "allSprints":false,
             "issues":[]
         }
 
@@ -471,6 +472,10 @@
                         case "ShowStatesOnBacklogBoard": {
                             gc.process.showStatesOnBacklogBoard.canShow = true;
                             log(`Процесс разрешен: ${process.key}`);
+                            if ("showAllSprints" in process & process.showAllSprints == "true") {
+                                gc.process.showStatesOnBacklogBoard.showAllSprints = true;
+                                log(`Процесс разрешен: showAllSprints = true`)
+                            }
                             break; }
                     }
                 }
@@ -1493,32 +1498,47 @@
         }
     }
     function showStatesOnBacklogBoardLoadTasks(){
-        // получаем первый активный спринт
-        let sprintId = GetFirstCurrentActiveSprintId();
-        // запрашиваем статусы всех задач в нем
-        if (sprintId > 0) {
-            log(`Считываем задачи спринта ${sprintId}`);
-            let jqlQuery = `Sprint =${sprintId}  `;
-            let requestParams = [{key:'maxResults',value:'2000'},{key:'jql',value:jqlQuery},{key:'fields',value:'key,id,status'}];
-            // получаем результаты запроса - массив задач
-            //let objIssues = JSON.parse(GetIssuesByQueryAjax(jqlQuery,requestParams));
-            let objIssues = GetIssuesByQueryAjax(jqlQuery,requestParams);
-            //log(`${JSON.stringify(objIssues)}`);
-            if (objIssues) {
-                if ('total' in objIssues && objIssues.total > 0) {
-                    let sprintTasks = [];
-                    // обходим полученные задачи
-                    for (let objIssue of objIssues.issues) {
-                        // результаты кладем в массив процесса
-                        gc.process.showStatesOnBacklogBoard.issues.push({"id":objIssue.id,"key":objIssue.key,"statusName":objIssue.fields.status.name});
-                    }
-                    // разрешаем отображение статусов по данным массива
-                    //gc.process.showStatesOnBacklogBoard.canShow = true;
-                    //setTimeout(showStatesOnBacklogBoard, 10);
-                    log(`Считано ${objIssues.total} задач`);
-                } else log('Считано 0 задач');
-            } else log('Ошибка получения объекта с задачами');
-        } else log('Не найден активный спринт');
+        let sprints_el;
+        let sprints_jql = ""
+        if (!gc.process.showStatesOnBacklogBoard.showAllSprints) {
+            sprints_el = $('.ghx-backlog-container.ghx-sprint-active.js-sprint-container').first();
+        } else {
+            sprints_el = $('.ghx-backlog-container.js-sprint-container');
+        }
+        if (sprints_el) {
+            log(`Найдено будущих спринтов: ${sprints_el.length}`);
+            $(sprints_el).each(function(indx){
+                let pref = ","
+                if (indx == 0) { pref = "" }
+                let sprintId = $(this).attr('data-sprint-id');
+                //let sprintName = $(this).find('.js-edit-sprintName-trigger').attr('data-fieldvalue');
+                log(`sprintId ${sprintId}`);
+                sprints_jql+=`${pref}${sprintId}`
+            });
+            if (sprints_jql.length > 0) {
+                log(`Считываем задачи спринтов ${sprints_jql}`);
+                let jqlQuery = `Sprint in (${sprints_jql})  `;
+                let requestParams = [{key:'maxResults',value:'2000'},{key:'jql',value:jqlQuery},{key:'fields',value:'key,id,status'}];
+                // получаем результаты запроса - массив задач
+                //let objIssues = JSON.parse(GetIssuesByQueryAjax(jqlQuery,requestParams));
+                let objIssues = GetIssuesByQueryAjax(jqlQuery,requestParams);
+                //log(`${JSON.stringify(objIssues)}`);
+                if (objIssues) {
+                    if ('total' in objIssues && objIssues.total > 0) {
+                        let sprintTasks = [];
+                        // обходим полученные задачи
+                        for (let objIssue of objIssues.issues) {
+                            // результаты кладем в массив процесса
+                            gc.process.showStatesOnBacklogBoard.issues.push({"id":objIssue.id,"key":objIssue.key,"statusName":objIssue.fields.status.name});
+                        }
+                        // разрешаем отображение статусов по данным массива
+                        //gc.process.showStatesOnBacklogBoard.canShow = true;
+                        //setTimeout(showStatesOnBacklogBoard, 10);
+                        log(`Считано ${objIssues.total} задач`);
+                    } else log('Считано 0 задач');
+                } else log('Ошибка получения объекта с задачами');
+            }
+        } else log(`Не найдено ни одного спринта`)
     }
     // отображение статусов задач на доске бэклога для первого активного спринта
     function showStatesOnBacklogBoard(){
@@ -1533,7 +1553,7 @@
         // если у нас есть уже задачи или мы только что их получили, то обновляем статусы
         if (gc.process.showStatesOnBacklogBoard.issues.length >0) {
             // находим первый активный спринт
-            let $elCurrentSprints = $(".ghx-backlog-container.ghx-sprint-active.js-sprint-container.ghx-open").first();
+            let $elCurrentSprints = $(".ghx-backlog-container.js-sprint-container");
             if ($elCurrentSprints.length>0) {
                 // обходим все элементы задач в списке
                 let $elTasks = $elCurrentSprints.find(".js-issue");
