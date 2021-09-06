@@ -3,7 +3,7 @@
     // Автор: Михальский Станислав, 2019-2021
 
     const script_version = '1.14.13'
-    const environment = "DEV"; // DEV TEST PROD
+    const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -3868,3 +3868,4 @@ body {
     }
 })();
 //</script>
+

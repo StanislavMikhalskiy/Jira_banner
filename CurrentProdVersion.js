@@ -2,7 +2,7 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.11'
+    const script_version = '1.14.13'
     const environment = "PROD"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
@@ -145,6 +145,7 @@
             { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0},
             { "key":"addEpicSmartTasks", "value":"btn-smart-epic", "isEventAdded":false, "tryAddEventCount":0}]
         gc['process'] = {}
+        gc['boardTeamConfigUrl']="http://dev.gitlab-pages.aservices.tech/jira-automatizator-scripts/planningConfig.json"
 
         // настройки процесса загрузки спринта
         gc.process["sprintResourceCalc"] = {
@@ -420,9 +421,22 @@
     // получить разрешения для команд
     function getPermissions(){
         // считываем настройки по командам
+        /*console.time('getBoardTeamConfig');
+        let prBoardTeamConfigData =  getBoardTeamConfig();
+        prBoardTeamConfigData.then(
+            result => {
+                console.timeEnd('getBoardTeamConfig'); //
+                //log(`${JSON.stringify(result)} `);
+            },
+            error => {
+                log(`Не удалось считать настройки по командам`);
+            }
+        )
+        console.time('readConfigFromTask');*/
         let prTeamsConfigData =  getIssue("PSQL-222","description");
         prTeamsConfigData.then(
             result => {
+                console.timeEnd('readConfigFromTask');// 46ms
                 let obj = JSON.parse(result);
                 if ('fields' in obj && obj.fields != null) {
                     if ('description' in obj.fields && obj.fields.description != null) {
@@ -452,6 +466,32 @@
                 log(`Не удалось считать настройки по командам`);
             }
         )
+    }
+    // возвращает конфиг досок команд
+    function getBoardTeamConfig(){
+        return new Promise(function(resolve,reject){
+            let url = new URL(gc.boardTeamConfigUrl);
+            fetch(url, {mode: 'cors'}/*, {
+                method: 'get',
+                headers: {
+                    "Content-type": "application/json; charset=utf-8"
+                    //,"Authorization":credentials.jira.Authorization
+                }
+            }*/).then(response => {
+                    if (response.status != "200") {
+                        log(`Ошибка выполнения запроса getBoardTeamConfig, response.status = ${response.status} `);
+                        response.json().then(function(data) {
+                            //log(`${JSON.stringify(data)} `);
+                            reject(JSON.stringify(data));
+                        });
+                    } else {
+                        response.json().then(function(data) {
+                            resolve(JSON.stringify(data));
+                        })
+                    }
+                }
+            )
+        })
     }
     function ApplyRules(objTeamPermissions){
         for (let objPermission of objTeamPermissions) {
@@ -2067,7 +2107,7 @@
                             "summary": "[T] Тестирование эпика",
                             "description": `Тестирование эпика`,
                             "timetracking": "",
-                            "assignee": { "name": "a.ivanov"}}
+                            "assignee": { "name": "zarubin"}}
                     },
                     { "fields": {
                             "summary": "[B] Завести издания для рассылок",
@@ -2100,12 +2140,6 @@
                             "description": "Слить ветку эпика в основную ветку разработки",
                             "timetracking": "30m",
                             "assignee": { "name": "kharitonov"}}
-                    },
-                    { "fields": {
-                            "summary": "[T] Регресс эпика",
-                            "description": "Регресс эпика",
-                            "timetracking": "",
-                            "assignee": { "name": "a.ivanov"}}
                     },
                     { "fields": {
                             "summary": "[B] Подключить оценочную нападалку",
@@ -2312,7 +2346,7 @@ where p.pub_id = 9\n
                     },
                     { "fields": {
                             "summary": "Настроить GA",
-                            "description": `Требуется для но����ого издания\n
+                            "description": `Требуется для нового издания\n
 # Встроить код счетчиков GA в GTM
 # Создать представления для Системы в GA\n
 После ввода Системы в промышленную эксплуатацию:
@@ -2430,6 +2464,15 @@ where p.pub_id = 9\n
                     { "fields": {
                             "summary": "Заведение виджетов ЛК. Проверка",
                             "description": `Добавить продукту виджеты в БО ЛК в соответствии с инструкцией: https://conf.action-media.ru/pages/viewpage.action?pageId=208914315`}
+                    },
+                    { "fields": {
+                            "summary": "Маппинг журналов. Назначить на Борисова",
+                            "description": `В таблице для маппингов, необходимо указать\n
+* название системы,
+* номер версии продукта системы,
+* название ешки (вип-тарифы нужно указывать дополнительно),
+* виды доступа (демо или платный)\n
+https://conf.action-media.ru/pages/viewpage.action?pageId=220281947 инструкция`}
                     }
                 ]
             }
@@ -3723,7 +3766,10 @@ where p.pub_id = 9\n
     margin-bottom: 15px;
 }
 .btn_add{
-width: 83px;
+    width: 83px;
+    position: sticky;
+    top: -20px;
+    z-index: 10;
 }
 body {
 	font-size:14px;
