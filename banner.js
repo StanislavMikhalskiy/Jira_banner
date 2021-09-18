@@ -2,8 +2,8 @@
 (function() {
     // Автор: Михальский Станислав, 2019-2021
 
-    const script_version = '1.14.13'
-    const environment = "PROD"; // DEV TEST PROD
+    const script_version = '1.15.0'
+    const environment = "DEV"; // DEV TEST PROD
     let log_preffix = `${environment} Banner: `
     // глобальный конфиг разных процессов
     let gc = {}
@@ -145,7 +145,7 @@
             { "key":"addSmartTasks", "value":"bcklg-tools-menu-sub-tasks_v3", "isEventAdded":false, "tryAddEventCount":0},
             { "key":"addEpicSmartTasks", "value":"btn-smart-epic", "isEventAdded":false, "tryAddEventCount":0}]
         gc['process'] = {}
-        gc['boardTeamConfigUrl']="http://dev.gitlab-pages.aservices.tech/jira-automatizator-scripts/planningConfig.json"
+        gc['boardTeamConfigUrl']="https://dev.gitlab-pages.aservices.tech/jira-automatizator-scripts/planningConfig.json"
 
         // настройки процесса загрузки спринта
         gc.process["sprintResourceCalc"] = {
@@ -347,6 +347,17 @@
         $element.text("Запустить SMART диалог для эпиков");
         $menu.append($element);
 
+        // загрузить скрипт
+        $element = $('<a>').attr({
+            class: "drophref",
+            href : "#"
+        })
+            .click(function() {
+                $.getScript("https://dev.gitlab-pages.aservices.tech/jira-automatizator-scripts/epicCreateManyTasks.js");
+            });
+        $element.text("Загрузить скрипт");
+        $menu.append($element);
+
     }
     // добавляем обработчики кнопкам, которые добавлены через ScriptRunner
     function AddEventToButton(){
@@ -421,46 +432,27 @@
     // получить разрешения для команд
     function getPermissions(){
         // считываем настройки по командам
-        /*console.time('getBoardTeamConfig');
+        console.time('getBoardTeamConfig');
         let prBoardTeamConfigData =  getBoardTeamConfig();
         prBoardTeamConfigData.then(
             result => {
                 console.timeEnd('getBoardTeamConfig'); //
                 //log(`${JSON.stringify(result)} `);
-            },
-            error => {
-                log(`Не удалось считать настройки по командам`);
-            }
-        )
-        console.time('readConfigFromTask');*/
-        let prTeamsConfigData =  getIssue("PSQL-222","description");
-        prTeamsConfigData.then(
-            result => {
-                console.timeEnd('readConfigFromTask');// 46ms
-                let obj = JSON.parse(result);
-                if ('fields' in obj && obj.fields != null) {
-                    if ('description' in obj.fields && obj.fields.description != null) {
-                        let objTeamPermissions = [];
-                        // очистка данных
-                        let x = JSON.stringify(obj.fields.description).replace(/{code:json}|{code}|\\r|\\n|\\/g, '');
-                        x = x.replace(/"\[{/g, '[{');
-                        x = x.replace(/}\]"/g, '}]');
-                        let teamsData = JSON.parse(x);
-                        // обходим полученный массив комманд
-                        for (let teamData of teamsData) {
-                            //log(`teamData.rapidView ${teamData.rapidView}`);
+                let objTeamPermissions = [];
+                let teamsData = result;//JSON.parse(x);
+                // обходим полученный массив комманд
+                for (let teamData of teamsData) {
+                    //log(`teamData.rapidView ${teamData.rapidView}`);
 
-                            if ('rapidView' in teamData && teamData.rapidView != null && gc.urlParams.has("rapidView") && teamData.rapidView == gc.urlParams.get("rapidView")) {
-                                objTeamPermissions.push(teamData);
-                            }
-                        }
-                        // если разрешения были получены - запускаем обработчики правил
-                        if (objTeamPermissions.length>0) {
-                            setTimeout(ApplyRules, 200, objTeamPermissions); log(`Запуск setTimeout(ApplyRules)`);
-                        }
-                        //log.warn(`Данные по команде не получены`);
-                    } else log(`Нет данных по полю "description"`);
-                } else log(`Нет данных по полю "fields"`);
+                    if ('rapidView' in teamData && teamData.rapidView != null && gc.urlParams.has("rapidView") && teamData.rapidView == gc.urlParams.get("rapidView")) {
+                        objTeamPermissions.push(teamData);
+                    }
+                }
+                // если разрешения были получены - запускаем обработчики правил
+                if (objTeamPermissions.length>0) {
+                    setTimeout(ApplyRules, 200, objTeamPermissions); log(`Запуск setTimeout(ApplyRules)`);
+                }
+                //log.warn(`Данные по команде не получены`);
             },
             error => {
                 log(`Не удалось считать настройки по командам`);
@@ -471,13 +463,8 @@
     function getBoardTeamConfig(){
         return new Promise(function(resolve,reject){
             let url = new URL(gc.boardTeamConfigUrl);
-            fetch(url, {mode: 'cors'}/*, {
-                method: 'get',
-                headers: {
-                    "Content-type": "application/json; charset=utf-8"
-                    //,"Authorization":credentials.jira.Authorization
-                }
-            }*/).then(response => {
+            fetch(url).then(response => {
+                //log(`getBoardTeamConfig, response.status = ${response.status} `);
                 if (response.status != "200") {
                     log(`Ошибка выполнения запроса getBoardTeamConfig, response.status = ${response.status} `);
                     response.json().then(function(data) {
@@ -486,7 +473,8 @@
                     });
                 } else {
                     response.json().then(function(data) {
-                        resolve(JSON.stringify(data));
+                        //resolve(JSON.stringify(data));
+                        resolve(data);
                     })
                 }
                 }
@@ -3868,4 +3856,3 @@ body {
     }
 })();
 //</script>
-
